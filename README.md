@@ -30,3 +30,7 @@ The app listens on the PORT environment variable automatically.
 - One player creates a room.
 - The second player joins using the room code.
 - The auction room syncs live through Socket.IO.
+
+## Background music
+
+The title screen starts looping background music after the first click. The track is "NPC Theme" by HoliznaCC0, released under CC0 1.0 Universal: https://freemusicarchive.org/music/holiznacc0/chiptunes/npc-theme/. The game streams it from Free Music Archive, and the sound toggle pauses or resumes it.

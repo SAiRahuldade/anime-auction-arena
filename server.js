@@ -170,8 +170,11 @@ app.get('/health', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('online:createRoom', ({ name }) => {
-    const roomCode = randomCode();
+  socket.on('online:createRoom', ({ name } = {}, acknowledge) => {
+    let roomCode = randomCode();
+    while (rooms.has(roomCode)) {
+      roomCode = randomCode();
+    }
     const room = {
       code: roomCode,
       players: [],
@@ -191,23 +194,33 @@ io.on('connection', (socket) => {
 
     socket.data.roomCode = roomCode;
     socket.data.playerIndex = 0;
+    if (typeof acknowledge === 'function') {
+      acknowledge({ ok: true, roomCode });
+    }
     emitRoomState(room);
   });
 
-  socket.on('online:joinRoom', ({ roomCode, name }) => {
+  socket.on('online:joinRoom', ({ roomCode, name } = {}, acknowledge) => {
+    const reject = (message) => {
+      if (typeof acknowledge === 'function') {
+        acknowledge({ ok: false, message });
+      } else {
+        socket.emit('room:error', { message });
+      }
+    };
     const room = getRoom((roomCode || '').toUpperCase());
     if (!room) {
-      socket.emit('room:error', { message: 'Room not found. Check the code and try again.' });
+      reject('Room not found. Check the code and try again.');
       return;
     }
 
     if (room.players.length >= 2) {
-      socket.emit('room:error', { message: 'This room is already full.' });
+      reject('This room is already full.');
       return;
     }
 
     if (room.players.some(player => player.socketId === socket.id)) {
-      socket.emit('room:error', { message: 'You are already in this room.' });
+      reject('You are already in this room.');
       return;
     }
 
@@ -223,6 +236,9 @@ io.on('connection', (socket) => {
     socket.data.roomCode = room.code;
     socket.data.playerIndex = room.players.length - 1;
 
+    if (typeof acknowledge === 'function') {
+      acknowledge({ ok: true, roomCode: room.code });
+    }
     if (room.players.length === 2) {
       beginAuction(room);
     } else {
@@ -278,11 +294,11 @@ io.on('connection', (socket) => {
     }
 
     if (room.started && room.players.length < 2) {
-      room.started = false;
-      room.auction = null;
-      if (room.auction && room.auction.timer) {
+      if (room.auction?.timer) {
         clearInterval(room.auction.timer);
       }
+      room.started = false;
+      room.auction = null;
     }
 
     emitRoomState(room);

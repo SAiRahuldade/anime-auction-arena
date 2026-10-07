@@ -58,6 +58,7 @@ const CHARACTER_THEME_MAP = {
 
 const PLAYER_NAME_KEY = "aaa_player_name";
 let activeCharacterTheme = null;
+let backgroundMusic = null;
 
 function fillPlayerSetupFromSavedName() {
     const savedName = localStorage.getItem(PLAYER_NAME_KEY);
@@ -124,6 +125,21 @@ function stopCharacterTheme() {
     activeCharacterTheme.pause();
     activeCharacterTheme.currentTime = 0;
     activeCharacterTheme = null;
+}
+
+function playBackgroundMusic() {
+    if (!GameState.soundEnabled) return;
+
+    if (!backgroundMusic) {
+        backgroundMusic = new Audio("https://files.freemusicarchive.org/storage-freemusicarchive-org/tracks/C7M9Cd9JgJNU23FyQCUqy9yw0fAmLpNj4rl88fwj.mp3");
+        backgroundMusic.loop = true;
+        backgroundMusic.volume = 0.2;
+        backgroundMusic.preload = "none";
+    }
+
+    backgroundMusic.play().catch((error) => {
+        console.warn("Background music could not be played.", error);
+    });
 }
 
 function playCharacterTheme(char) {
@@ -333,6 +349,9 @@ soundToggleBtn.addEventListener("click", () => {
     GameState.soundEnabled = !GameState.soundEnabled;
     if (!GameState.soundEnabled) {
         stopCharacterTheme();
+        if (backgroundMusic) backgroundMusic.pause();
+    } else {
+        playBackgroundMusic();
     }
     soundToggleBtn.textContent = GameState.soundEnabled ? "🔊" : "🔇";
     soundToggleBtn.classList.toggle("muted", !GameState.soundEnabled);
@@ -512,6 +531,18 @@ if (socket) {
         GameState.online.connected = true;
     });
 
+    socket.on("connect_error", () => {
+        GameState.online.connected = false;
+        $("online-room-status").textContent = "Can't connect to the game server yet. It may be waking up; retrying...";
+    });
+
+    socket.on("disconnect", () => {
+        GameState.online.connected = false;
+        if (GameState.currentMode === "online") {
+            $("online-room-status").textContent = "Disconnected from the game server. Reconnecting...";
+        }
+    });
+
     socket.on("room:state", (state) => {
         GameState.online.roomCode = state.roomCode || "";
         GameState.online.myPlayerIndex = state.myPlayerIndex;
@@ -524,6 +555,8 @@ if (socket) {
             $("p1-name").value = GameState.players[0].name;
             $("p2-name").value = GameState.players[1].name;
             $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
+        } else {
+            $("online-room-status").textContent = `Room ${state.roomCode} created. Share this code and wait for your friend.`;
         }
 
         if (state.started && state.auction && state.auction.currentChar) {
@@ -568,6 +601,7 @@ if (socket) {
 $("btn-start").addEventListener("click", () => {
     initAudio();
     sfxBid();
+    playBackgroundMusic();
     fillPlayerSetupFromSavedName();
     showScreen("screen-name-entry");
 });
@@ -595,36 +629,55 @@ qsa(".mode-btn").forEach(button => {
 });
 
 // ==================== LOBBY ====================
-function startOnlineRoomFlow() {
+function startOnlineRoomFlow(action) {
     if (!socket) {
-      $("online-room-status").textContent = "Multiplayer socket unavailable. Refresh and try again.";
-      return;
+        $("online-room-status").textContent = "Multiplayer socket unavailable. Refresh and try again.";
+        return;
     }
 
     const playerName = ($("p1-name").value || "Player").trim() || "Player";
     const roomCodeInput = ($("room-code-input").value || "").trim().toUpperCase();
 
-    if (!roomCodeInput) {
-        socket.emit("online:createRoom", { name: playerName });
-        $("online-room-status").textContent = "Creating room...";
+    if (action === "join" && !roomCodeInput) {
+        $("online-room-status").textContent = "Enter a room code before joining.";
         return;
     }
 
-    socket.emit("online:joinRoom", { roomCode: roomCodeInput, name: playerName });
-    $("online-room-status").textContent = `Joining room ${roomCodeInput}...`;
+    const isCreating = action === "create";
+    const event = isCreating ? "online:createRoom" : "online:joinRoom";
+    const payload = isCreating
+        ? { name: playerName }
+        : { roomCode: roomCodeInput, name: playerName };
+    $("online-room-status").textContent = `${socket.connected ? "" : "Connecting to the game server... "}${isCreating ? "Creating room..." : `Joining room ${roomCodeInput}...`}`;
+
+    socket.timeout(120000).emit(event, payload, (error, response) => {
+        if (error) {
+            $("online-room-status").textContent = "The server didn't respond after two minutes. Check your connection and try again.";
+            return;
+        }
+        if (!response?.ok) {
+            $("online-room-status").textContent = response?.message || "Couldn't complete the room request. Please try again.";
+            return;
+        }
+        if (isCreating && response.roomCode) {
+            $("room-code-input").value = response.roomCode;
+            $("online-room-status").textContent = `Room ${response.roomCode} created. Share this code and wait for your friend.`;
+        }
+    });
 }
 
 $("btn-create-room").addEventListener("click", () => {
-    startOnlineRoomFlow();
+    startOnlineRoomFlow("create");
 });
 
 $("btn-join-room").addEventListener("click", () => {
-    startOnlineRoomFlow();
+    startOnlineRoomFlow("join");
 });
 
 $("btn-start-auction").addEventListener("click", () => {
     if (GameState.currentMode === "online") {
-        startOnlineRoomFlow();
+        const roomCode = $("room-code-input").value.trim();
+        startOnlineRoomFlow(roomCode ? "join" : "create");
         return;
     }
 
