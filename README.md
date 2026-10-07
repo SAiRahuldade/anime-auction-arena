@@ -25,6 +25,10 @@ This project is ready to deploy to Render.
 
 The app listens on the PORT environment variable automatically.
 
+### Persistent multiplayer rooms
+
+Create a Supabase Postgres project, copy its Postgres connection string (use the Session pooler connection string if the Render service cannot reach the direct database host), and add it to the Render web service as the secret environment variable `DATABASE_URL`. Include `sslmode=require` in the connection string. The server creates its `game_rooms` table on startup and restores active room state after restarts. Without `DATABASE_URL`, the app runs in local in-memory mode and rooms are lost when the server restarts.
+
 ## Multiplayer flow
 
 - One player creates a room.
