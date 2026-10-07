@@ -3,7 +3,7 @@
 // ============================================================
 
 // ==================== GAME STATE ====================
-const socket = io();
+const socket = typeof io !== "undefined" ? io() : null;
 
 const GameState = {
     currentScreen: "title",
@@ -507,60 +507,62 @@ function sfxXTierReveal() {
     });
 }
 
-socket.on("connect", () => {
-    GameState.online.connected = true;
-});
+if (socket) {
+    socket.on("connect", () => {
+        GameState.online.connected = true;
+    });
 
-socket.on("room:state", (state) => {
-    GameState.online.roomCode = state.roomCode || "";
-    GameState.online.myPlayerIndex = state.myPlayerIndex;
-    GameState.online.state = state;
-    $("room-code-input").value = state.roomCode || $("room-code-input").value;
+    socket.on("room:state", (state) => {
+        GameState.online.roomCode = state.roomCode || "";
+        GameState.online.myPlayerIndex = state.myPlayerIndex;
+        GameState.online.state = state;
+        $("room-code-input").value = state.roomCode || $("room-code-input").value;
 
-    if (state.players && state.players.length >= 2) {
-        GameState.players[0].name = state.players[0]?.name || GameState.players[0].name;
-        GameState.players[1].name = state.players[1]?.name || GameState.players[1].name;
-        $("p1-name").value = GameState.players[0].name;
-        $("p2-name").value = GameState.players[1].name;
-        $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
-    }
-
-    if (state.started && state.auction && state.auction.currentChar) {
-        const char = state.auction.currentChar;
-        const p1 = state.players[0];
-        const p2 = state.players[1];
-
-        $("auction-p1-name").textContent = p1?.name || "Player 1";
-        $("auction-p2-name").textContent = p2?.name || "Player 2";
-        $("bid-p1-label").textContent = p1?.name || "Player 1";
-        $("bid-p2-label").textContent = p2?.name || "Player 2";
-        $("auction-p1-budget").textContent = formatBudget(p1?.budget ?? 30);
-        $("auction-p2-budget").textContent = formatBudget(p2?.budget ?? 30);
-        $("auction-p1-cards").textContent = `${p1?.teamCount ?? 0}/${GameState.maxCards} cards`;
-        $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0}/${GameState.maxCards} cards`;
-        $("auction-round").textContent = `${state.auction.currentIndex + 1} / ${state.auction.poolSize}`;
-        $("timer-text").textContent = state.auction.timeLeft;
-        $("card-tier").textContent = char.tier;
-        $("card-name").textContent = char.name;
-        $("card-series").textContent = char.series;
-        $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
-        $("card-base-price").textContent = char.baseCost;
-        $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
-
-        $("pbs-p1-amount").textContent = `$${state.auction.playerBids[0] || 0}`;
-        $("pbs-p2-amount").textContent = `$${state.auction.playerBids[1] || 0}`;
-        $("pbs-p1-state").textContent = state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
-        $("pbs-p2-state").textContent = state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
-
-        if (GameState.currentScreen !== "screen-auction") {
-            showScreen("screen-auction");
+        if (state.players && state.players.length >= 2) {
+            GameState.players[0].name = state.players[0]?.name || GameState.players[0].name;
+            GameState.players[1].name = state.players[1]?.name || GameState.players[1].name;
+            $("p1-name").value = GameState.players[0].name;
+            $("p2-name").value = GameState.players[1].name;
+            $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
         }
-    }
-});
 
-socket.on("room:error", ({ message }) => {
-    $("online-room-status").textContent = message;
-});
+        if (state.started && state.auction && state.auction.currentChar) {
+            const char = state.auction.currentChar;
+            const p1 = state.players[0];
+            const p2 = state.players[1];
+
+            $("auction-p1-name").textContent = p1?.name || "Player 1";
+            $("auction-p2-name").textContent = p2?.name || "Player 2";
+            $("bid-p1-label").textContent = p1?.name || "Player 1";
+            $("bid-p2-label").textContent = p2?.name || "Player 2";
+            $("auction-p1-budget").textContent = formatBudget(p1?.budget ?? 30);
+            $("auction-p2-budget").textContent = formatBudget(p2?.budget ?? 30);
+            $("auction-p1-cards").textContent = `${p1?.teamCount ?? 0}/${GameState.maxCards} cards`;
+            $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0}/${GameState.maxCards} cards`;
+            $("auction-round").textContent = `${state.auction.currentIndex + 1} / ${state.auction.poolSize}`;
+            $("timer-text").textContent = state.auction.timeLeft;
+            $("card-tier").textContent = char.tier;
+            $("card-name").textContent = char.name;
+            $("card-series").textContent = char.series;
+            $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+            $("card-base-price").textContent = char.baseCost;
+            $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+
+            $("pbs-p1-amount").textContent = `$${state.auction.playerBids[0] || 0}`;
+            $("pbs-p2-amount").textContent = `$${state.auction.playerBids[1] || 0}`;
+            $("pbs-p1-state").textContent = state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
+            $("pbs-p2-state").textContent = state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
+
+            if (GameState.currentScreen !== "screen-auction") {
+                showScreen("screen-auction");
+            }
+        }
+    });
+
+    socket.on("room:error", ({ message }) => {
+        $("online-room-status").textContent = message;
+    });
+}
 
 // ==================== TITLE SCREEN ====================
 $("btn-start").addEventListener("click", () => {
@@ -594,6 +596,11 @@ qsa(".mode-btn").forEach(button => {
 
 // ==================== LOBBY ====================
 function startOnlineRoomFlow() {
+    if (!socket) {
+      $("online-room-status").textContent = "Multiplayer socket unavailable. Refresh and try again.";
+      return;
+    }
+
     const playerName = ($("p1-name").value || "Player").trim() || "Player";
     const roomCodeInput = ($("room-code-input").value || "").trim().toUpperCase();
 
@@ -1052,7 +1059,7 @@ document.addEventListener("click", (e) => {
         if (!e.target.disabled) {
             if (GameState.currentMode === "online") {
                 const roomCode = GameState.online.roomCode || $("room-code-input").value.trim().toUpperCase();
-                if (roomCode && GameState.online.myPlayerIndex !== null) {
+                if (socket && roomCode && GameState.online.myPlayerIndex !== null) {
                     socket.emit("auction:bid", {
                         roomCode,
                         playerIndex: GameState.online.myPlayerIndex,
@@ -1061,6 +1068,11 @@ document.addEventListener("click", (e) => {
                     return;
                 }
             }
+            handleBid(player, amount);
+        }
+    }
+});
+
 // Keyboard shortcuts for bidding
 document.addEventListener("keydown", (e) => {
     if (GameState.currentScreen !== "screen-auction") return;
