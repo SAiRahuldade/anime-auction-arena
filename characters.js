@@ -961,46 +961,6 @@ const SYNERGIES = [
     },
 ];
 
-// ============================================================
-// MARKET EVENTS (random mid-auction events)
-// ============================================================
-
-const MARKET_EVENTS = [
-    {
-        name: "MARKET CRASH!",
-        icon: "📉",
-        description: "The anime economy tanks! Everyone loses $5!",
-        effect: (player) => { player.budget = Math.max(0, player.budget - 5); },
-    },
-    {
-        name: "SPONSORSHIP DEAL!",
-        icon: "💰",
-        description: "A mysterious sponsor donates! Everyone gains +$6!",
-        effect: (player) => { player.budget += 6; },
-    },
-    {
-        name: "POWER SURGE!",
-        icon: "⚡",
-        description: "The next character gets +15 ATK!",
-        effect: null, // Handled in auction logic
-        charBonus: { atk: 15 },
-    },
-    {
-        name: "DISCOUNT HOUR!",
-        icon: "🏷️",
-        description: "The next character's base price is halved!",
-        effect: null,
-        priceModifier: 0.5,
-    },
-    {
-        name: "WILD CARD!",
-        icon: "🃏",
-        description: "Both players get +$3 but the timer is halved!",
-        effect: (player) => { player.budget += 3; },
-        timerModifier: 0.5,
-    },
-];
-
 if (typeof module !== "undefined" && module.exports) {
     module.exports = { CHARACTER_DB };
 }

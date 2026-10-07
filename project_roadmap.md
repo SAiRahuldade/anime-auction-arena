@@ -10,8 +10,8 @@
 | Status | Task | File | Details |
 |--------|------|------|---------|
 | ✅ | HTML Structure | [index.html](file:///c:/Users/rahul/Desktop/Anime/index.html) | All 5 screens: Title, Lobby, Auction, Battle, Victory |
-| ✅ | Character Database | [characters.js](file:///c:/Users/rahul/Desktop/Anime/characters.js) | 20 characters, synergies, market events |
-| ✅ | Game Engine | [game.js](file:///c:/Users/rahul/Desktop/Anime/game.js) | Auction logic, battle engine, victory flow |
+| ✅ | Character Database | [characters.js](file:///c:/Users/rahul/Desktop/Anime/characters.js) | Character roster and synergies |
+| ✅ | Game Engine | [game.js](file:///c:/Users/rahul/Desktop/Anime/game.js) | 15-character auction, unlimited roster, battle engine, victory flow |
 | ✅ | Stylesheet | [style.css](file:///c:/Users/rahul/Desktop/Anime/style.css) | Full premium dark-mode UI styling |
 
 ---
@@ -195,4 +195,3 @@ Overall:                 █████████████░░░ ~88% �
 
 > [!TIP]
 > **Game is fully playable!** 🎮 50 characters, tournament brackets, save/load, sound controls — all working. Open `index.html` to play!
-

@@ -16,7 +16,7 @@ const io = new Server(server, {
 });
 
 const PORT = process.env.PORT || 3000;
-const MAX_AUCTION_ROUNDS = 20;
+const MAX_AUCTION_ROUNDS = 15;
 const rooms = new Map();
 const roomStore = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5 })
@@ -268,18 +268,6 @@ async function resolveAuctionRound(room) {
   room.auction.currentIndex += 1;
   if (room.auction.currentIndex >= room.auction.pool.length) {
     clearInterval(room.auction.timer);
-    if (room.players.some(player => player.team.length > 0)) {
-      room.players.forEach(player => {
-        while (player.team.length < 3) {
-          const available = CHARACTER_DB.filter(character =>
-            !room.players.some(candidate => candidate.team.some(owned => owned.id === character.id))
-          );
-          if (available.length === 0) break;
-          const freeCharacter = available[Math.floor(Math.random() * available.length)];
-          player.team.push({ ...freeCharacter });
-        }
-      });
-    }
     room.started = false;
     room.auction = null;
     room.auctionComplete = true;

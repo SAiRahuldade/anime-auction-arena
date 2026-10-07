@@ -28,9 +28,6 @@ const GameState = {
         timeLeft: 10,
         maxTime: 10,
         passed: [false, false],
-        charBonus: null,
-        priceModifier: 1,
-        timerModifier: 1,
         resolving: false,
     },
     battle: {
@@ -40,8 +37,7 @@ const GameState = {
         turnCount: 0,
         battleOver: false,
     },
-    maxCards: 3,
-    totalAuctionRounds: 20,
+    totalAuctionRounds: 15,
     soundEnabled: true,
     powerRevealSkip: false,
     aiThinking: false,
@@ -182,11 +178,10 @@ function updateOnlineBidControls() {
             const player = state?.players?.[index];
             const cannotAfford = amount > 0 && state?.auction &&
                 state.auction.currentBid + amount > (player?.budget ?? 0);
-            const teamFull = (player?.teamCount ?? 0) >= GameState.maxCards;
             button.disabled = online && (
                 playerIndex !== index ||
                 !state?.started ||
-                (amount > 0 && (cannotAfford || teamFull))
+                (amount > 0 && cannotAfford)
             );
             button.setAttribute("aria-label", online && playerIndex !== index
                 ? `${button.textContent.trim()} (opponent controls, read only)`
@@ -360,9 +355,6 @@ function resetGameState() {
         timeLeft: 10,
         maxTime: 10,
         passed: [false, false],
-        charBonus: null,
-        priceModifier: 1,
-        timerModifier: 1,
         resolving: false,
     };
 
@@ -750,8 +742,8 @@ if (socket) {
             $("bid-p2-label").textContent = p2?.name || "Player 2";
             $("auction-p1-budget").textContent = formatBudget(p1?.budget ?? 30);
             $("auction-p2-budget").textContent = formatBudget(p2?.budget ?? 30);
-            $("auction-p1-cards").textContent = `${p1?.teamCount ?? 0}/${GameState.maxCards} cards`;
-            $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0}/${GameState.maxCards} cards`;
+            $("auction-p1-cards").textContent = `${p1?.teamCount ?? 0} characters`;
+            $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0} characters`;
             $("auction-round").textContent = `${state.auction.currentIndex + 1} / ${state.auction.poolSize}`;
             $("timer-text").textContent = state.auction.timeLeft;
 
@@ -799,7 +791,6 @@ function updateOnlineAuctionView(state, previousAuction) {
             $("card-name").textContent = char.name;
             $("card-series").textContent = char.series;
             $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
-            $("card-base-price").textContent = char.baseCost;
             $("card-tags").innerHTML = (char.tags || []).map(tag => `<span class="tag">${tag}</span>`).join("");
             $("card-result-overlay").classList.add("hidden");
             $("card-result-overlay").classList.remove("show");
@@ -979,7 +970,7 @@ function startOnlineAuction() {
 function startAuction() {
     stopBackgroundMusic();
 
-    // Pick 20 characters from the pool based on tier rarity
+    // Pick 15 unique characters based on tier rarity.
     const tierWeights = { "X": 8, "SSS": 12, "S": 15, "A": 18, "B": 24, "C": 28 };
     let weightedPool = [];
 
@@ -1014,10 +1005,6 @@ function startAuction() {
     
     GameState.auction.pool = pool;
     GameState.auction.currentIndex = 0;
-    GameState.auction.charBonus = null;
-    GameState.auction.priceModifier = 1;
-    GameState.auction.timerModifier = 1;
-
     $("auction-p1-name").textContent = GameState.players[0].name;
     $("auction-p2-name").textContent = GameState.players[1].name;
     $("bid-p1-label").textContent = GameState.players[0].name;
@@ -1032,8 +1019,8 @@ function startAuction() {
 function updateAuctionUI() {
     $("auction-p1-budget").textContent = formatBudget(GameState.players[0].budget);
     $("auction-p2-budget").textContent = formatBudget(GameState.players[1].budget);
-    $("auction-p1-cards").textContent = `${GameState.players[0].team.length}/${GameState.maxCards} cards`;
-    $("auction-p2-cards").textContent = `${GameState.players[1].team.length}/${GameState.maxCards} cards`;
+    $("auction-p1-cards").textContent = `${GameState.players[0].team.length} characters`;
+    $("auction-p2-cards").textContent = `${GameState.players[1].team.length} characters`;
     $("auction-round").textContent = `${GameState.auction.currentIndex + 1} / ${GameState.auction.pool.length}`;
 
     // Disable bid buttons if can't afford or team full
@@ -1041,12 +1028,11 @@ function updateAuctionUI() {
         const idx = p - 1;
         const player = GameState.players[idx];
         const btns = qsa(`.p${p}-btn`);
-        const teamFull = player.team.length >= GameState.maxCards;
         btns.forEach(btn => {
             const amount = parseInt(btn.dataset.amount) || 0;
             const newBid = GameState.auction.currentBid + amount;
             if (amount > 0) {
-                btn.disabled = teamFull || newBid > player.budget;
+                btn.disabled = newBid > player.budget;
             } else {
                 // PASS button
                 btn.disabled = false;
@@ -1062,24 +1048,7 @@ function presentCharacter() {
         return;
     }
 
-    // Check for market event (30% chance after round 3)
-    if (idx >= 3 && Math.random() < 0.3) {
-        triggerMarketEvent();
-    }
-
     const char = { ...GameState.auction.pool[idx] };
-
-    // Apply bonuses from previous events
-    if (GameState.auction.charBonus) {
-        Object.keys(GameState.auction.charBonus).forEach(stat => {
-            char[stat] = (char[stat] || 0) + GameState.auction.charBonus[stat];
-        });
-        GameState.auction.charBonus = null;
-    }
-    if (GameState.auction.priceModifier !== 1) {
-        char.baseCost = Math.max(1, Math.round(char.baseCost * GameState.auction.priceModifier));
-        GameState.auction.priceModifier = 1;
-    }
 
     // Store modified char back
     GameState.auction.pool[idx] = char;
@@ -1098,7 +1067,6 @@ function presentCharacter() {
     $("card-name").textContent = char.name;
     $("card-series").textContent = char.series;
     $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
-    $("card-base-price").textContent = char.baseCost;
     $("card-tags").innerHTML = char.tags.map(t => `<span class="tag">${t}</span>`).join("");
     playCharacterTheme(char);
 
@@ -1131,10 +1099,9 @@ function presentCharacter() {
 
 function startBidTimer() {
     clearInterval(GameState.auction.timer);
-    const maxTime = Math.round(10 * GameState.auction.timerModifier);
+    const maxTime = 10;
     GameState.auction.maxTime = maxTime;
     GameState.auction.timeLeft = maxTime;
-    GameState.auction.timerModifier = 1;
 
     updateTimerUI();
 
@@ -1180,8 +1147,7 @@ function getAiCharacterValue(char) {
     const tierValue = { C: 5, B: 9, A: 14, S: 21, SSS: 34, X: 52 };
     const tagBoost = (char.tags || []).includes("Villain") ? 3 : 0;
     const powerBoost = Math.max(0, Math.round(getCharacterPowerLevel(char) / 180));
-    const rosterGapBoost = (GameState.maxCards - GameState.players[1].team.length) * 2;
-    return (tierValue[char.tier] || 8) + tagBoost + powerBoost + rosterGapBoost;
+    return (tierValue[char.tier] || 8) + tagBoost + powerBoost;
 }
 
 function getAiBidDecision(char) {
@@ -1192,7 +1158,6 @@ function getAiBidDecision(char) {
     const characterValue = getAiCharacterValue(char);
     const budgetComfort = Math.min(aiPlayer.budget, Math.max(8, Math.round(characterValue * 0.8)));
 
-    if (aiPlayer.team.length >= GameState.maxCards) return 0;
     if (currentBid === 0) {
         if (characterValue >= 20 && aiPlayer.budget >= 1 && Math.random() < (characterValue >= 40 ? 0.9 : 0.6)) {
             return char.tier === "X" || char.tier === "SSS" ? 5 : (characterValue >= 28 ? 2 : 1);
@@ -1248,34 +1213,6 @@ function scheduleAiDecision() {
     }, delay);
 }
 
-function triggerMarketEvent() {
-    const event = MARKET_EVENTS[rand(0, MARKET_EVENTS.length - 1)];
-    sfxEvent();
-
-    if (event.effect) {
-        GameState.players.forEach(p => event.effect(p));
-    }
-    if (event.charBonus) {
-        GameState.auction.charBonus = event.charBonus;
-    }
-    if (event.priceModifier) {
-        GameState.auction.priceModifier = event.priceModifier;
-    }
-    if (event.timerModifier) {
-        GameState.auction.timerModifier = event.timerModifier;
-    }
-
-    // Show popup
-    const popup = $("market-event-popup");
-    $("event-title").textContent = `${event.icon} ${event.name}`;
-    $("event-desc").textContent = event.description;
-    popup.classList.add("show");
-    setTimeout(() => popup.classList.remove("show"), 2500);
-
-    addAuctionLog(`${event.icon} EVENT: ${event.name} — ${event.description}`, "log-event");
-    updateAuctionUI();
-}
-
 // ==================== BIDDING ====================
 function handleBid(playerIndex, amount) {
     if (GameState.auction.resolving) return;
@@ -1313,8 +1250,6 @@ function handleBid(playerIndex, amount) {
 
     const newBid = GameState.auction.currentBid + amount;
     if (newBid > player.budget) return;
-    if (player.team.length >= GameState.maxCards) return;
-
     GameState.auction.currentBid = newBid;
     GameState.auction.currentBidder = playerIndex;
     GameState.auction.playerBids[playerIndex] = newBid;
@@ -1369,13 +1304,10 @@ async function resolveBid() {
     overlay.classList.remove("show");
     overlay.classList.add("hidden");
 
-    const bothFull = GameState.players[0].team.length >= GameState.maxCards &&
-        GameState.players[1].team.length >= GameState.maxCards;
-
     GameState.auction.currentIndex++;
     updateAuctionUI();
 
-    if (bothFull || GameState.auction.currentIndex >= GameState.auction.pool.length) {
+    if (GameState.auction.currentIndex >= GameState.auction.pool.length) {
         endAuction();
     } else {
         presentCharacter();
@@ -1454,19 +1386,6 @@ function endAuction() {
 
     if (!anyWon) {
         addAuctionLog("🏁 No bids were placed, so no one receives any characters.", "log-system");
-    } else if (GameState.currentMode !== "online") {
-        GameState.players.forEach(player => {
-            while (player.team.length < GameState.maxCards) {
-                const remaining = CHARACTER_DB.filter(c =>
-                    !GameState.players[0].team.some(t => t.id === c.id) &&
-                    !GameState.players[1].team.some(t => t.id === c.id)
-                );
-                if (remaining.length === 0) break;
-                const freeChar = remaining[rand(0, remaining.length - 1)];
-                player.team.push({ ...freeChar });
-                addAuctionLog(`🎁 ${player.name} gets ${freeChar.name} for free (unsold)!`, "log-system");
-            }
-        });
     }
 
     applySynergies();
