@@ -252,20 +252,52 @@
             </div>
 
             <div class="power-reveal-phase hidden" id="power-phase-roster">
-                <h2 class="power-roster-name" id="power-roster-name">Player 1</h2>
-                <p class="power-roster-label">FIGHTERS</p>
-                <div class="power-flash-card" id="power-flash-card">
-                    <div class="power-flash-avatar char-avatar char-avatar-lg" id="power-flash-avatar"></div>
-                    <div class="power-flash-name" id="power-flash-name">Character</div>
-                    <div class="power-flash-combat-stats" id="power-flash-combat-stats"></div>
-                    <div class="power-flash-ultimate" id="power-flash-ultimate"></div>
-                    <div class="power-flash-ability" id="power-flash-ability"></div>
-                    <div class="power-flash-value" id="power-flash-value">0</div>
-                    <div class="power-flash-pl-label">POWER LEVEL</div>
+                <div id="power-single-roster">
+                    <h2 class="power-roster-name" id="power-roster-name">Player 1</h2>
+                    <p class="power-roster-label">FIGHTERS</p>
+                    <div class="power-flash-card" id="power-flash-card">
+                        <div class="power-flash-avatar char-avatar char-avatar-lg" id="power-flash-avatar"></div>
+                        <div class="power-flash-name" id="power-flash-name">Character</div>
+                        <div class="power-flash-combat-stats" id="power-flash-combat-stats"></div>
+                        <div class="power-flash-ultimate" id="power-flash-ultimate"></div>
+                        <div class="power-flash-ability" id="power-flash-ability"></div>
+                        <div class="power-flash-value" id="power-flash-value">0</div>
+                        <div class="power-flash-pl-label">POWER LEVEL</div>
+                    </div>
+                    <div class="power-roster-total hidden" id="power-roster-total">
+                        <span class="power-total-label">TEAM TOTAL</span>
+                        <span class="power-total-value" id="power-roster-total-value">0</span>
+                    </div>
                 </div>
-                <div class="power-roster-total hidden" id="power-roster-total">
-                    <span class="power-total-label">TEAM TOTAL</span>
-                    <span class="power-total-value" id="power-roster-total-value">0</span>
+
+                <div class="battle-paired-reveal hidden" id="battle-paired-reveal">
+                    <h2 class="battle-paired-title">FIGHTER LINEUP</h2>
+                    <div class="battle-paired-owners">
+                        <span class="battle-paired-owner battle-paired-owner-left" id="battle-reveal-left-owner"></span>
+                        <span class="battle-paired-owner battle-paired-owner-right" id="battle-reveal-right-owner"></span>
+                    </div>
+                    <div class="battle-paired-matchup">
+                        <div class="power-flash-card battle-paired-card" id="battle-reveal-left-card">
+                            <div class="power-flash-avatar char-avatar char-avatar-lg battle-paired-avatar" id="battle-reveal-left-avatar"></div>
+                            <div class="power-flash-name" id="battle-reveal-left-name"></div>
+                            <div class="power-flash-combat-stats" id="battle-reveal-left-stats"></div>
+                            <div class="power-flash-ultimate" id="battle-reveal-left-ultimate"></div>
+                            <div class="power-flash-ability" id="battle-reveal-left-ability"></div>
+                            <div class="power-flash-value" id="battle-reveal-left-value"></div>
+                            <div class="power-flash-pl-label">POWER LEVEL</div>
+                        </div>
+                        <div class="battle-paired-vs">VS</div>
+                        <div class="power-flash-card battle-paired-card" id="battle-reveal-right-card">
+                            <div class="power-flash-avatar char-avatar char-avatar-lg battle-paired-avatar" id="battle-reveal-right-avatar"></div>
+                            <div class="power-flash-name" id="battle-reveal-right-name"></div>
+                            <div class="power-flash-combat-stats" id="battle-reveal-right-stats"></div>
+                            <div class="power-flash-ultimate" id="battle-reveal-right-ultimate"></div>
+                            <div class="power-flash-ability" id="battle-reveal-right-ability"></div>
+                            <div class="power-flash-value" id="battle-reveal-right-value"></div>
+                            <div class="power-flash-pl-label">POWER LEVEL</div>
+                        </div>
+                    </div>
+                    <p class="battle-paired-counter" id="battle-reveal-counter"></p>
                 </div>
             </div>
 

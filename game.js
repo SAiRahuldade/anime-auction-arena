@@ -547,9 +547,8 @@ function sfxSold() {
 }
 function sfxHit() { playTone(150, 0.15, "sawtooth", 0.12); }
 function sfxBell() {
-    playTone(880, 0.7, "sine", 0.34);
-    playTone(1320, 0.5, "sine", 0.18);
-    setTimeout(() => playTone(660, 0.85, "sine", 0.3), 90);
+    playTone(880, 0.45, "sine", 0.24);
+    setTimeout(() => playTone(660, 0.6, "sine", 0.22), 120);
 }
 
 const BATTLE_TURN_INTERVAL_MS = 2900;
@@ -1871,29 +1870,66 @@ function isBattleSequenceActive(sequenceId) {
 async function replayBattleRosters(sequenceId) {
     const skipButton = $("btn-skip-reveal");
     const previousDisplay = skipButton.style.display;
+    const pairedReveal = $("battle-paired-reveal");
+    const singleRoster = $("power-single-roster");
     skipButton.style.display = "none";
     setPowerPhase("power-phase-roster");
     $("power-roster-total").classList.add("hidden");
-    $("power-flash-card").classList.remove("hidden");
+    singleRoster.classList.add("hidden");
+    pairedReveal.classList.remove("hidden");
     $("power-winner-banner").classList.add("hidden");
     $("btn-power-continue").classList.add("hidden");
     showScreen("screen-power-reveal");
 
     try {
-        for (let playerIndex = 0; playerIndex < GameState.players.length; playerIndex++) {
-            const player = GameState.players[playerIndex];
-            $("power-roster-name").textContent = player.name;
-            $("power-roster-name").className = `power-roster-name ${playerIndex === 0 ? "name-red" : "name-blue"}`;
-            for (const char of player.team) {
-                if (!isBattleSequenceActive(sequenceId)) return;
-                await flashFighter(char, 500);
-            }
-            $("power-flash-card").classList.add("hidden");
-            $("power-roster-total").classList.add("hidden");
+        const [leftPlayer, rightPlayer] = GameState.players;
+        $("battle-reveal-left-owner").textContent = leftPlayer.name;
+        $("battle-reveal-right-owner").textContent = rightPlayer.name;
+        const pairCount = Math.max(leftPlayer.team.length, rightPlayer.team.length);
+
+        for (let index = 0; index < pairCount; index++) {
+            if (!isBattleSequenceActive(sequenceId)) return;
+            renderBattleRevealCard("left", leftPlayer.team[index] || null);
+            renderBattleRevealCard("right", rightPlayer.team[index] || null);
+            $("battle-reveal-counter").textContent = `PAIR ${index + 1} / ${pairCount}`;
+            sfxBid();
+            await sleep(500);
         }
     } finally {
+        pairedReveal.classList.add("hidden");
+        singleRoster.classList.remove("hidden");
         skipButton.style.display = previousDisplay;
     }
+}
+
+function renderBattleRevealCard(side, char) {
+    const card = $(`battle-reveal-${side}-card`);
+    card.classList.remove("flash-in", "tier-spotlight", "is-empty");
+    card.className = "power-flash-card battle-paired-card";
+
+    if (!char) {
+        card.classList.add("is-empty");
+        $(`battle-reveal-${side}-avatar`).textContent = "—";
+        $(`battle-reveal-${side}-name`).textContent = "No fighter";
+        $(`battle-reveal-${side}-stats`).textContent = "";
+        $(`battle-reveal-${side}-ultimate`).textContent = "";
+        $(`battle-reveal-${side}-ability`).textContent = "";
+        $(`battle-reveal-${side}-value`).textContent = "";
+    } else {
+        card.classList.add(`tier-${char.tier.toLowerCase()}`);
+        if (["X", "SSS", "S"].includes(char.tier)) {
+            card.classList.add("tier-spotlight");
+        }
+        setCharacterAvatar($(`battle-reveal-${side}-avatar`), char, "char-avatar-lg battle-paired-avatar");
+        $(`battle-reveal-${side}-name`).textContent = char.name;
+        $(`battle-reveal-${side}-stats`).textContent = formatBattleStats(char);
+        $(`battle-reveal-${side}-ultimate`).textContent = `🌟 ${char.ultimate}`;
+        $(`battle-reveal-${side}-ability`).textContent = char.abilityDesc ? `✨ ${char.abilityDesc}` : "";
+        $(`battle-reveal-${side}-value`).textContent = formatPowerLevel(getCharacterPowerLevel(char));
+    }
+
+    void card.offsetWidth;
+    card.classList.add("flash-in");
 }
 
 async function showMatchIntro(sequenceId) {
