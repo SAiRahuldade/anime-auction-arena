@@ -135,6 +135,7 @@ function prepareLobbyForMode(mode) {
         onlinePanel.classList.toggle("hidden", mode !== "online");
     }
     updateOnlineLobbyControls();
+    updateOnlineBidControls();
 
     showScreen("screen-lobby");
 }
@@ -166,6 +167,13 @@ function updateOnlineLobbyControls(state = GameState.online.state) {
         ? "inline-flex"
         : "none";
     startButton.querySelector(".btn-text").textContent = "START AUCTION →";
+}
+
+function updateOnlineBidControls() {
+    const online = GameState.currentMode === "online";
+    const playerIndex = GameState.online.myPlayerIndex;
+    $("p1-bid-controls").style.display = online && playerIndex !== 0 ? "none" : "";
+    $("p2-bid-controls").style.display = online && playerIndex !== 1 ? "none" : "";
 }
 
 function stopCharacterTheme() {
@@ -621,17 +629,21 @@ if (socket) {
     });
 
     socket.on("room:state", (state) => {
-        const auctionWasStarted = GameState.online.state?.started;
+        const previousState = GameState.online.state;
+        const previousAuction = previousState?.auction;
+        const auctionWasStarted = previousState?.started;
         GameState.online.roomCode = state.roomCode || "";
         GameState.online.myPlayerIndex = state.myPlayerIndex;
         GameState.online.state = state;
         localStorage.setItem(ONLINE_ROOM_CODE_KEY, state.roomCode || "");
         $("room-code-input").value = state.roomCode || $("room-code-input").value;
         updateOnlineLobbyControls(state);
+        updateOnlineBidControls();
 
         if (state.started) {
             stopBackgroundMusic();
         } else if (auctionWasStarted && !state.started) {
+            stopCharacterTheme();
             playBackgroundMusic();
         }
 
@@ -663,17 +675,7 @@ if (socket) {
         }
 
         if (state.started && state.auction) {
-            const char = state.auction.currentChar;
-            if (char) {
-                $("card-tier").textContent = char.tier;
-                $("card-name").textContent = char.name;
-                $("card-series").textContent = char.series;
-                $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
-                $("card-base-price").textContent = char.baseCost;
-                $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
-            } else {
-                $("card-name").textContent = "Preparing next character...";
-            }
+            updateOnlineAuctionView(state, previousAuction);
             const p1 = state.players[0];
             const p2 = state.players[1];
 
@@ -690,14 +692,81 @@ if (socket) {
 
             $("pbs-p1-amount").textContent = `$${state.auction.playerBids[0] || 0}`;
             $("pbs-p2-amount").textContent = `$${state.auction.playerBids[1] || 0}`;
-            $("pbs-p1-state").textContent = state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
-            $("pbs-p2-state").textContent = state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
+            $("pbs-p1-state").textContent = state.auction.passed?.[0] ? "PASSED" : state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
+            $("pbs-p2-state").textContent = state.auction.passed?.[1] ? "PASSED" : state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
         }
     });
 
     socket.on("room:error", ({ message }) => {
         $("online-room-status").textContent = message;
     });
+}
+
+function updateOnlineAuctionView(state, previousAuction) {
+    const auction = state.auction;
+    const char = auction.currentChar;
+    const previousChar = previousAuction?.currentChar;
+    const isNewCharacter = !!char && (
+        char.id !== previousChar?.id ||
+        auction.currentIndex !== previousAuction?.currentIndex
+    );
+
+    GameState.auction.timeLeft = auction.timeLeft;
+    GameState.auction.maxTime = auction.maxTime || 10;
+    GameState.auction.currentBid = auction.currentBid || 0;
+    GameState.auction.currentBidder = auction.currentBidder;
+    GameState.auction.playerBids = [...(auction.playerBids || [0, 0])];
+    GameState.auction.passed = [...(auction.passed || [false, false])];
+    updateTimerUI();
+
+    if (char) {
+        if (isNewCharacter) {
+            const card = $("auction-card");
+            card.className = `auction-card tier-${String(char.tier).toLowerCase()} card-enter`;
+            card.dataset.id = char.id;
+            if (["X", "SSS", "S"].includes(char.tier)) {
+                card.classList.add("tier-spotlight");
+                setTimeout(() => card.classList.remove("tier-spotlight"), 1400);
+            }
+            setTimeout(() => card.classList.remove("card-enter"), 600);
+            $("card-tier").textContent = char.tier;
+            setCharacterAvatar($("card-avatar"), char, "char-avatar-xl card-avatar");
+            $("card-name").textContent = char.name;
+            $("card-series").textContent = char.series;
+            $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+            $("card-base-price").textContent = char.baseCost;
+            $("card-tags").innerHTML = (char.tags || []).map(tag => `<span class="tag">${tag}</span>`).join("");
+            $("card-result-overlay").classList.add("hidden");
+            $("card-result-overlay").classList.remove("show");
+
+            stopCharacterTheme();
+            playCharacterTheme(char);
+            if (char.tier === "SSS") sfxXTierReveal();
+        }
+    } else {
+        $("card-name").textContent = "Preparing next character...";
+    }
+
+    if (previousAuction) {
+        const bidChanges = auction.playerBids.map((bid, index) =>
+            bid - (previousAuction.playerBids?.[index] || 0)
+        );
+        const bidIncrease = Math.max(...bidChanges);
+        if (bidIncrease > 0) {
+            sfxBidAmount(bidIncrease);
+        } else if ((auction.passed || []).some((passed, index) =>
+            passed && !previousAuction.passed?.[index]
+        )) {
+            sfxPass();
+        }
+
+        if (auction.currentIndex > previousAuction.currentIndex && previousAuction.currentBidder !== null) {
+            sfxSold();
+        }
+        if (auction.timeLeft < previousAuction.timeLeft && auction.timeLeft <= 3) {
+            playTone(800 + (3 - auction.timeLeft) * 200, 0.08, "square", 0.06);
+        }
+    }
 }
 
 // ==================== TITLE SCREEN ====================
