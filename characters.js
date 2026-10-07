@@ -772,6 +772,58 @@ const CHARACTER_DB = [
 
 ];
 
+const CHARACTER_BALANCE = {
+    101: ["X", 300, 48, 36, 70, 20, 3.0, "Author's Rewrite", "undoHit", "Once per fight, undo one hit by restoring its damage as HP."],
+    102: ["X", 300, 50, 38, 55, 20, 3.0, "Spiral Nemesis", "halveUltimate", "Takes half damage from enemy ultimates."],
+    103: ["X", 290, 49, 38, 62, 20, 3.0, "Creation Magic: Time Rewind", "ignore25Def", "Ignores 25% of enemy DEF."],
+    99: ["X", 290, 46, 38, 60, 20, 3.0, "Azathoth: Void Annihilation", "stealAtk", "Steals 10% of enemy ATK each turn."],
+    104: ["X", 280, 40, 36, 65, 20, 2.8, "Silver Crystal Cosmos Blast", "regen5", "Heals 5% of max HP each turn."],
+    105: ["X", 270, 44, 40, 40, 15, 3.0, "Gate of Truth: Equivalent Exchange", "stealDef", "Steals 3 DEF from the enemy per hit."],
+    106: ["SSS", 250, 42, 30, 55, 18, 2.6, "Almighty: Rewrite the Future", "foresight", "Has a 25% chance to dodge on turn 1."],
+    42: ["SSS", 240, 42, 30, 62, 20, 3.0, "Serious Punch", "growAtk2", "Gains 2 ATK each turn."],
+    1: ["SSS", 240, 41, 29, 66, 18, 2.7, "Ultra Instinct Kamehameha", "gokuDodge", "Automatically dodges while below 40% HP."],
+    5: ["SSS", 230, 39, 28, 60, 17, 2.6, "Final Flash", "buffOnHit2", "Gains 2 ATK each time he is hit."],
+    44: ["SSS", 220, 36, 27, 62, 16, 2.5, "Death Ball", "lowerDef2", "Lowers enemy DEF by 2 each turn."],
+    11: ["SSS", 235, 40, 28, 60, 17, 2.7, "Beast Cannon", "lowHpAtk6", "Gains 6 ATK once below 35% HP."],
+    2: ["SSS", 235, 38, 28, 58, 18, 2.6, "Six Paths Rasenshuriken", "dodge15", "Has a 15% chance to dodge."],
+    6: ["SSS", 225, 39, 26, 66, 17, 2.6, "Indra's Arrow", "negateHit", "Once per fight, negates one incoming hit."],
+    100: ["SSS", 230, 40, 27, 64, 18, 2.6, "Monarch's Domain: Shadow Army", "revive20", "Once per fight, revives at 20% HP."],
+    107: ["S", 200, 35, 24, 68, 18, 2.5, "Cosmic Copy Burst", "copyDamage", "Copies the damage of the enemy's last hit."],
+    23: ["S", 200, 35, 22, 62, 18, 2.6, "Malevolent Shrine", "ignore20Def", "Ignores 20% of enemy DEF."],
+    45: ["S", 195, 34, 24, 56, 16, 2.5, "Perfect Susanoo Meteor", "regen4", "Heals 4% of max HP each turn."],
+    21: ["S", 190, 34, 22, 70, 17, 2.7, "Hollow Purple", "negateHit", "Infinity negates the first incoming hit."],
+    3: ["S", 200, 32, 22, 64, 15, 2.5, "Gear 5 Bajrang Gun", "reduceDamage15", "Takes 15% less damage."],
+    4: ["S", 185, 33, 22, 64, 16, 2.6, "Final Getsuga Tenshou", "buffAtk3", "Gains 5 ATK for 3 turns, once per fight."],
+    29: ["S", 200, 31, 26, 45, 14, 2.8, "Rumbling Titan Stomp", "regen6", "Regenerates 6 HP each turn."],
+    35: ["S", 175, 33, 22, 66, 15, 2.4, "Royal Fury Barrage", "buffDefOnHit", "Gains 1 DEF after every hit taken."],
+    7: ["A", 160, 28, 20, 56, 14, 2.2, "Asura Ichibugin", "secondSlash", "Has a 20% chance to land a second hit."],
+    15: ["A", 140, 26, 16, 62, 14, 2.4, "Senkei Senbonzakura Kageyoshi", "dodge12", "Has a 12% chance to dodge."],
+    13: ["A", 145, 27, 15, 64, 13, 2.2, "Diable Jambe Hell Memories", "burn3", "Burns the enemy for 3 HP per turn for 3 turns."],
+    50: ["A", 150, 27, 18, 60, 15, 2.5, "The World: Road Roller", "skipTurn", "Once per fight, skips the enemy's next attack."],
+    49: ["A", 150, 27, 18, 58, 15, 2.4, "Star Platinum: The World", "doubleHit15", "Has a 15% chance to land a double hit."],
+    47: ["A", 135, 25, 16, 62, 13, 2.3, "Daiguren Hyorinmaru", "slow10", "Lowers enemy SPD by 10."],
+    10: ["A", 140, 25, 15, 58, 14, 2.3, "Kamui Raikiri", "repeatDamage", "Once per fight, repeats the enemy's last damage."],
+    33: ["A", 130, 25, 14, 72, 14, 2.2, "Godspeed Lightning Palm", "dodge15", "Has a 15% chance to dodge."],
+    32: ["A", 135, 27, 14, 58, 14, 2.6, "Jajanken Rock (Adult Form)", "glassCannon", "Takes 10% extra damage."],
+    34: ["A", 130, 24, 14, 60, 13, 2.3, "Bungee Gum Barrage", "slow8", "Lowers enemy SPD by 8."],
+    37: ["A", 130, 24, 14, 52, 13, 2.4, "Flame Alchemy Hellfire", "burn3", "Burns the enemy for 3 HP per turn for 3 turns."],
+    28: ["B", 120, 22, 14, 54, 14, 2.2, "Blood Demon Tendril Storm", "regen5", "Regenerates 5 HP each turn."],
+    22: ["B", 115, 21, 13, 56, 14, 2.4, "Black Flash", "crit25", "Has a 20% chance to deal 25% extra damage."],
+    25: ["B", 110, 20, 12, 52, 14, 2.3, "Hinokami Kagura", "buffOnHit2", "Gains 2 ATK each time he is hit."],
+    41: ["B", 110, 20, 14, 50, 12, 2.3, "Incineration Cannon", "growAtk1", "Gains 1 ATK each turn."],
+    27: ["B", 110, 20, 12, 54, 14, 2.3, "Ninth Form: Purgatory", "burn3", "Burns the enemy for 3 HP per turn for 3 turns."],
+    12: ["B", 105, 22, 10, 68, 12, 2.6, "Eight Gates: Hirudora", "eightGates", "Gains 6 ATK and loses 5 HP each turn."],
+    26: ["B", 100, 20, 10, 70, 13, 2.4, "Thunderclap Flash", "crit50", "Has a 20% chance to deal 50% extra damage."],
+    36: ["B", 105, 18, 12, 54, 12, 2.2, "Clap Transmutation Blade", "buffDef4", "Gains 4 DEF for 2 turns, once per fight."],
+};
+
+CHARACTER_DB.forEach(char => {
+    const balance = CHARACTER_BALANCE[char.id];
+    if (!balance) return;
+    const [tier, hp, atk, def, spd, sp, ultimateMultiplier, ultimate, abilityKey, abilityDesc] = balance;
+    Object.assign(char, { tier, hp, atk, def, sp, spd, ultimateMultiplier, ultimate, abilityKey, abilityDesc });
+});
+
 // Canon power levels (×1,000 scale) and fair auction prices ($30 budget)
 const CHAR_ECONOMY = {
     101: { powerLevel: 50000, baseCost: 20 },
@@ -824,6 +876,24 @@ CHARACTER_DB.forEach(char => {
         char.powerLevel = econ.powerLevel;
         char.baseCost = econ.baseCost;
     }
+});
+
+const TIER_PRICE_RANGES = {
+    X: [20, 25],
+    SSS: [12, 15],
+    S: [9, 11],
+    A: [6, 8],
+    B: [3, 5],
+};
+
+Object.entries(TIER_PRICE_RANGES).forEach(([tier, [minimum, maximum]]) => {
+    const tierCharacters = CHARACTER_DB
+        .filter(char => char.tier === tier)
+        .sort((left, right) => right.powerLevel - left.powerLevel);
+    tierCharacters.forEach((char, index) => {
+        const rank = tierCharacters.length > 1 ? index / (tierCharacters.length - 1) : 0;
+        char.baseCost = Math.round((maximum - rank * (maximum - minimum)) * 2) / 2;
+    });
 });
 
 function formatMoney(amount) {

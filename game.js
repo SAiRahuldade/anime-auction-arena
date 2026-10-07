@@ -64,6 +64,11 @@ let backgroundMusic = null;
 let pendingRoomAction = null;
 let roomRequestPending = false;
 let startAuctionPending = false;
+let battleSequenceId = 0;
+let battleSequenceRunning = false;
+let battleTurnTimeout = null;
+let powerRevealSequenceId = 0;
+let onlineBattleStartPending = false;
 
 function getOnlinePlayerId() {
     let playerId = sessionStorage.getItem(ONLINE_PLAYER_ID_KEY);
@@ -356,6 +361,15 @@ function shuffleArray(arr) {
 }
 
 function resetGameState() {
+    battleSequenceId++;
+    battleSequenceRunning = false;
+    powerRevealSequenceId++;
+    onlineBattleStartPending = false;
+    clearTimeout(battleTurnTimeout);
+    battleTurnTimeout = null;
+    $("btn-skip-reveal").style.display = "";
+    $("battle-match-intro").classList.remove("show", "is-winner");
+    $("battle-match-intro").setAttribute("aria-hidden", "true");
     if (GameState.auction.timer) {
         clearInterval(GameState.auction.timer);
     }
@@ -532,6 +546,14 @@ function sfxSold() {
     setTimeout(() => playTone(784, 0.2, "square", 0.1), 200);
 }
 function sfxHit() { playTone(150, 0.15, "sawtooth", 0.12); }
+function sfxBell() {
+    playTone(880, 0.45, "sine", 0.18);
+    setTimeout(() => playTone(660, 0.6, "sine", 0.16), 120);
+}
+
+const BATTLE_MOVE_INTERVAL_MS = 4000;
+const BATTLE_INTRO_DURATION_MS = 1800;
+const BATTLE_WINNER_DURATION_MS = 2200;
 function sfxUltimate() {
     playTone(440, 0.1, "square", 0.12);
     setTimeout(() => playTone(880, 0.1, "square", 0.12), 80);
@@ -688,6 +710,14 @@ if (socket) {
         }
     });
 
+    socket.on("battle:start", ({ roomCode } = {}) => {
+        if (GameState.currentMode !== "online" ||
+            String(roomCode || "").toUpperCase() !== GameState.online.roomCode.toUpperCase()) {
+            return;
+        }
+        launchTournament();
+    });
+
     socket.on("room:state", (state) => {
         const previousState = GameState.online.state;
         const previousAuction = previousState?.auction;
@@ -809,7 +839,10 @@ function updateOnlineAuctionView(state, previousAuction) {
             $("card-name").textContent = char.name;
             $("card-series").textContent = char.series;
             $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+            $("card-battle-stats").textContent = formatBattleStats(char);
+            $("card-ultimate").textContent = `ULTIMATE: ${char.ultimate}`;
             $("card-tags").innerHTML = (char.tags || []).map(tag => `<span class="tag">${tag}</span>`).join("");
+            $("card-ability").textContent = char.abilityDesc ? `ABILITY: ${char.abilityDesc}` : "";
             $("card-result-overlay").classList.add("hidden");
             $("card-result-overlay").classList.remove("show");
 
@@ -1089,7 +1122,10 @@ function presentCharacter() {
     $("card-name").textContent = char.name;
     $("card-series").textContent = char.series;
     $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+    $("card-battle-stats").textContent = formatBattleStats(char);
+    $("card-ultimate").textContent = `ULTIMATE: ${char.ultimate}`;
     $("card-tags").innerHTML = char.tags.map(t => `<span class="tag">${t}</span>`).join("");
+    $("card-ability").textContent = char.abilityDesc ? `ABILITY: ${char.abilityDesc}` : "";
     playCharacterTheme(char);
 
     // Reset bidding (starts at $0)
@@ -1432,7 +1468,11 @@ function formatPowerLevel(n) {
     return n.toLocaleString("en-US");
 }
 
-async function flashFighter(char) {
+function formatBattleStats(char) {
+    return `HP ${char.hp}  ·  ATK ${char.atk}  ·  DEF ${char.def}  ·  SP ${char.sp}%  ·  SPD ${char.spd}`;
+}
+
+async function flashFighter(char, duration = null) {
     const card = $("power-flash-card");
     const tierClass = `tier-${char.tier.toLowerCase()}`;
     card.className = `power-flash-card ${tierClass}`;
@@ -1443,6 +1483,9 @@ async function flashFighter(char) {
     }
     setCharacterAvatar($("power-flash-avatar"), char, "char-avatar-lg");
     $("power-flash-name").textContent = char.name;
+    $("power-flash-combat-stats").textContent = formatBattleStats(char);
+    $("power-flash-ultimate").textContent = `🌟 ${char.ultimate}`;
+    $("power-flash-ability").textContent = char.abilityDesc ? `✨ ${char.abilityDesc}` : "";
     $("power-flash-value").textContent = formatPowerLevel(getCharacterPowerLevel(char));
     card.classList.add("flash-in");
     if (char.tier === "SSS") {
@@ -1452,7 +1495,7 @@ async function flashFighter(char) {
     } else {
         sfxBid();
     }
-    await sleep(char.tier === "X" ? 2000 : 1400);
+    await sleep(duration ?? (char.tier === "X" ? 2000 : 1400));
 }
 
 async function revealPlayerRoster(playerIndex) {
@@ -1534,24 +1577,19 @@ function announcePowerWinner(p1Total, p2Total) {
     const banner = $("power-winner-banner");
     let text;
     if (p1Total > p2Total) {
-        text = `🏆 ${p1.name} WINS!`;
-        GameState.players[0].score = 1;
-        GameState.players[1].score = 0;
+        text = `${p1.name} has the highest overall power level!`;
     } else if (p2Total > p1Total) {
-        text = `🏆 ${p2.name} WINS!`;
-        GameState.players[0].score = 0;
-        GameState.players[1].score = 1;
+        text = `${p2.name} has the highest overall power level!`;
     } else {
-        text = "🤝 IT'S A TIE!";
-        GameState.players[0].score = 0;
-        GameState.players[1].score = 0;
+        text = "Both players have equal overall power levels.";
     }
     $("power-winner-text").textContent = text;
     banner.classList.remove("hidden");
-    sfxVictory();
+    sfxBid();
 }
 
 async function startPowerRevealSequence() {
+    const sequenceId = ++powerRevealSequenceId;
     GameState.powerRevealSkip = false;
     powerRevealAbort = { skip: false };
 
@@ -1572,13 +1610,16 @@ async function startPowerRevealSequence() {
 
     setPowerPhase("power-phase-intro");
     await sleep(1500);
+    if (sequenceId !== powerRevealSequenceId) return;
     if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
 
     setPowerPhase("power-phase-roster");
     await revealPlayerRoster(0);
+    if (sequenceId !== powerRevealSequenceId) return;
     if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
 
     await revealPlayerRoster(1);
+    if (sequenceId !== powerRevealSequenceId) return;
     if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
 
     setPowerPhase("power-phase-compare");
@@ -1589,6 +1630,7 @@ async function startPowerRevealSequence() {
     $("power-compare-p1-sum").textContent = formatPowerLevel(p1Total);
     $("power-compare-p2-sum").textContent = formatPowerLevel(p2Total);
     await sleep(2500);
+    if (sequenceId !== powerRevealSequenceId) return;
     if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
 
     setPowerPhase("power-phase-charts");
@@ -1599,6 +1641,7 @@ async function startPowerRevealSequence() {
     buildPerFighterCharts(p1.team, p2.team, maxPl);
     animateTotalBars(p1Total, p2Total);
     await sleep(1200);
+    if (sequenceId !== powerRevealSequenceId) return;
     announcePowerWinner(p1Total, p2Total);
     $("btn-power-continue").classList.remove("hidden");
 }
@@ -1618,6 +1661,7 @@ function finishPowerRevealSkipped(p1Total, p2Total, maxPl) {
 }
 
 $("btn-skip-reveal").addEventListener("click", () => {
+    powerRevealSequenceId++;
     GameState.powerRevealSkip = true;
     const p1Total = teamTotalPower(GameState.players[0]);
     const p2Total = teamTotalPower(GameState.players[1]);
@@ -1676,8 +1720,10 @@ function showTeamReview() {
                 <div class="tc-stats">
                     <span>PL: ${formatPowerLevel(getCharacterPowerLevel(c))}</span>
                 </div>
+                <div class="tc-combat-stats">${formatBattleStats(c)}</div>
                 <div class="tc-hp">HP: ${c.hp}</div>
                 <div class="tc-ultimate">🌟 ${c.ultimate}</div>
+                ${c.abilityDesc ? `<div class="tc-ability">✨ ${c.abilityDesc}</div>` : ""}
             </div>
         `).join("");
 
@@ -1695,18 +1741,58 @@ function showTeamReview() {
 }
 
 // ==================== BRACKET VISUALIZATION ====================
-$("btn-start-battle").addEventListener("click", () => {
-    sfxBid();
+function launchTournament() {
+    if (battleSequenceRunning) return;
+    const allowedScreens = ["screen-power-reveal", "screen-teams", "screen-bracket"];
+    if (!allowedScreens.includes(GameState.currentScreen)) return;
+
+    if (GameState.currentScreen === "screen-power-reveal") {
+        powerRevealSequenceId++;
+        GameState.powerRevealSkip = true;
+        showTeamReview();
+    }
     showBracket();
-});
+    void startBattle();
+}
+
+function requestTournamentStart() {
+    if (battleSequenceRunning || onlineBattleStartPending) return;
+    sfxBid();
+    if (GameState.currentMode !== "online") {
+        launchTournament();
+        return;
+    }
+    if (!socket?.connected || !GameState.online.roomCode) {
+        $("online-room-status").textContent = "Tournament start failed: reconnect to the online room and try again.";
+        return;
+    }
+
+    onlineBattleStartPending = true;
+    $("btn-start-battle").disabled = true;
+    socket.timeout(10000).emit("online:startBattle", {
+        roomCode: GameState.online.roomCode,
+    }, (error, response) => {
+        onlineBattleStartPending = false;
+        $("btn-start-battle").disabled = false;
+        if (error) {
+            $("online-room-status").textContent = "Tournament start timed out. Check the room connection and try again.";
+        } else if (!response?.ok) {
+            $("online-room-status").textContent = response?.message || "Could not start the online tournament.";
+        }
+    });
+}
+
+$("btn-start-battle").addEventListener("click", requestTournamentStart);
 
 function showBracket() {
     GameState.battle.rosters = GameState.players.map((player, owner) =>
         player.team.map(char => ({
             ...char,
             currentHp: char.hp,
+            baseAtk: char.atk,
+            baseDef: char.def,
+            baseSpd: char.spd,
             owner,
-            hasUsedUltimate: false,
         }))
     );
     GameState.battle.nextFighter = [1, 1];
@@ -1733,7 +1819,7 @@ function showBracket() {
                     </div>
                 `).join('<div class="bracket-vs">VS</div>')}
             </div>
-            <p class="bracket-round-label">Every fighter opens with their ultimate. Surviving fighters carry HP into the next fight.</p>
+            <p class="bracket-round-label">Ultimate chance follows each fighter's SP from turn 1. Survivors carry HP into the next fight.</p>
         </div>
     `;
 
@@ -1746,7 +1832,8 @@ $("btn-begin-fights").addEventListener("click", () => {
 });
 
 // ==================== BATTLE ENGINE ====================
-function startBattle() {
+async function startBattle() {
+    if (battleSequenceRunning) return;
     const matches = GameState.battle.matches;
     if (matches.length === 0) {
         GameState.players[0].score = GameState.battle.rosters[0].length ? 1 : 0;
@@ -1754,16 +1841,132 @@ function startBattle() {
         showVictoryScreen();
         return;
     }
+    const sequenceId = ++battleSequenceId;
+    battleSequenceRunning = true;
     GameState.battle.matchIndex = 0;
-    GameState.players[0].score = 0;
-    GameState.players[1].score = 0;
+    GameState.players[0].score = GameState.battle.rosters[0].length;
+    GameState.players[1].score = GameState.battle.rosters[1].length;
+    let firstFightStarted = false;
+    try {
+        await replayBattleRosters(sequenceId);
+        if (!isBattleSequenceActive(sequenceId)) return;
 
-    showScreen("screen-battle");
-    setupMatch();
+        showScreen("screen-battle");
+        setupMatch();
+        await showMatchIntro(sequenceId);
+        firstFightStarted = true;
+    } finally {
+        if (!firstFightStarted && sequenceId === battleSequenceId) {
+            battleSequenceRunning = false;
+        }
+    }
+}
+
+function isBattleSequenceActive(sequenceId) {
+    return battleSequenceRunning && sequenceId === battleSequenceId;
+}
+
+async function replayBattleRosters(sequenceId) {
+    const skipButton = $("btn-skip-reveal");
+    const previousDisplay = skipButton.style.display;
+    skipButton.style.display = "none";
+    setPowerPhase("power-phase-roster");
+    $("power-roster-total").classList.add("hidden");
+    $("power-flash-card").classList.remove("hidden");
+    $("power-winner-banner").classList.add("hidden");
+    $("btn-power-continue").classList.add("hidden");
+    showScreen("screen-power-reveal");
+
+    try {
+        for (let playerIndex = 0; playerIndex < GameState.players.length; playerIndex++) {
+            const player = GameState.players[playerIndex];
+            $("power-roster-name").textContent = player.name;
+            $("power-roster-name").className = `power-roster-name ${playerIndex === 0 ? "name-red" : "name-blue"}`;
+            for (const char of player.team) {
+                if (!isBattleSequenceActive(sequenceId)) return;
+                await flashFighter(char, 1000);
+            }
+            $("power-flash-card").classList.add("hidden");
+            $("power-roster-total-value").textContent = formatPowerLevel(teamTotalPower(player));
+            $("power-roster-total").classList.remove("hidden");
+            await sleep(500);
+            $("power-roster-total").classList.add("hidden");
+            $("power-flash-card").classList.remove("hidden");
+        }
+    } finally {
+        skipButton.style.display = previousDisplay;
+    }
+}
+
+async function showMatchIntro(sequenceId) {
+    if (!isBattleSequenceActive(sequenceId)) return;
+    const match = GameState.battle.currentFighters;
+    const overlay = $("battle-match-intro");
+    $("battle-intro-round").textContent = `ROUND ${GameState.battle.matchIndex + 1}`;
+    $("battle-intro-left-owner").textContent = GameState.players[match.left.owner].name;
+    $("battle-intro-right-owner").textContent = GameState.players[match.right.owner].name;
+    setCharacterAvatar($("battle-intro-left-avatar"), match.left, "char-avatar-lg battle-intro-avatar-image");
+    setCharacterAvatar($("battle-intro-right-avatar"), match.right, "char-avatar-lg battle-intro-avatar-image");
+    $("battle-intro-left-name").textContent = match.left.name;
+    $("battle-intro-right-name").textContent = match.right.name;
+    $("battle-intro-call").textContent = "";
+    overlay.classList.remove("is-winner");
+    overlay.setAttribute("aria-hidden", "false");
+    overlay.classList.add("show");
+    await sleep(BATTLE_INTRO_DURATION_MS);
+    if (!isBattleSequenceActive(sequenceId)) return;
+
+    sfxBell();
+    overlay.classList.remove("show");
+    overlay.setAttribute("aria-hidden", "true");
+    scheduleAutomaticTurn(sequenceId, 350);
+}
+
+function showRoundWinner(message) {
+    const overlay = $("battle-match-intro");
+    $("battle-intro-round").textContent = `ROUND ${GameState.battle.matchIndex + 1} OVER`;
+    $("battle-intro-call").textContent = message;
+    overlay.classList.add("is-winner", "show");
+    overlay.setAttribute("aria-hidden", "false");
+}
+
+function scheduleAutomaticTurn(sequenceId, delay = BATTLE_MOVE_INTERVAL_MS) {
+    clearTimeout(battleTurnTimeout);
+    battleTurnTimeout = setTimeout(() => {
+        battleTurnTimeout = null;
+        if (isBattleSequenceActive(sequenceId) && !GameState.battle.battleOver) {
+            executeTurn();
+        }
+    }, delay);
+}
+
+function continueAutomaticTournament(message, hasNextMatch) {
+    const sequenceId = battleSequenceId;
+    if (!isBattleSequenceActive(sequenceId)) return;
+
+    showRoundWinner(message);
+    battleTurnTimeout = setTimeout(() => {
+        battleTurnTimeout = null;
+        if (!isBattleSequenceActive(sequenceId)) return;
+        if (!hasNextMatch) {
+            battleSequenceRunning = false;
+            $("battle-match-intro").classList.remove("show", "is-winner");
+            $("battle-match-intro").setAttribute("aria-hidden", "true");
+            showVictoryScreen();
+            return;
+        }
+        $("battle-match-intro").classList.remove("show", "is-winner");
+        $("battle-match-intro").setAttribute("aria-hidden", "true");
+        GameState.battle.matchIndex++;
+        setupMatch();
+        showMatchIntro(sequenceId);
+    }, BATTLE_WINNER_DURATION_MS);
 }
 
 function setupMatch() {
     const match = GameState.battle.matches[GameState.battle.matchIndex];
+    resetFighterForMatch(match.left);
+    resetFighterForMatch(match.right);
     GameState.battle.currentFighters = match;
     GameState.battle.turnCount = 0;
     GameState.battle.battleOver = false;
@@ -1776,20 +1979,14 @@ function setupMatch() {
     $("fighter-left-owner").textContent = GameState.players[match.left.owner].name;
     setCharacterAvatar($("fighter-left-emoji"), match.left, "char-avatar-lg fighter-avatar");
     $("fighter-left-name").textContent = match.left.name;
-    $("fl-atk").textContent = `ATK: ${match.left.atk}`;
-    $("fl-def").textContent = `DEF: ${match.left.def}`;
-    $("fl-spd").textContent = `SPD: ${match.left.spd}`;
-    $("fl-sp").textContent = `SP: ${match.left.sp}`;
+    updateBattleStats("left", match.left);
     updateHP("left", match.left);
 
     // Right fighter
     $("fighter-right-owner").textContent = GameState.players[match.right.owner].name;
     setCharacterAvatar($("fighter-right-emoji"), match.right, "char-avatar-lg fighter-avatar");
     $("fighter-right-name").textContent = match.right.name;
-    $("fr-atk").textContent = `ATK: ${match.right.atk}`;
-    $("fr-def").textContent = `DEF: ${match.right.def}`;
-    $("fr-spd").textContent = `SPD: ${match.right.spd}`;
-    $("fr-sp").textContent = `SP: ${match.right.sp}`;
+    updateBattleStats("right", match.right);
     updateHP("right", match.right);
 
     // Clear battle log
@@ -1799,13 +1996,23 @@ function setupMatch() {
         </div>
     `;
 
-    $("btn-next-turn").style.display = "inline-flex";
-    $("btn-next-match").style.display = "none";
-    $("btn-next-match").querySelector(".btn-text").textContent = "NEXT FIGHT →";
-    
     // Reset fighter positions
     $("fighter-left").classList.remove("fighter-defeated");
     $("fighter-right").classList.remove("fighter-defeated");
+}
+
+function resetFighterForMatch(fighter) {
+    fighter.atk = fighter.baseAtk ?? fighter.atk;
+    fighter.def = fighter.baseDef ?? fighter.def;
+    fighter.spd = fighter.baseSpd ?? fighter.spd;
+    fighter.abilityUsed = false;
+    fighter.battleStarted = false;
+    fighter.atkBuffTurns = 0;
+    fighter.defBuffTurns = 0;
+    fighter.burns = [];
+    fighter.skipNextAttack = false;
+    fighter.lastIncomingDamage = 0;
+    fighter.lastDamageDealt = 0;
 }
 
 function updateHP(side, fighter) {
@@ -1823,15 +2030,21 @@ function updateHP(side, fighter) {
     }
 }
 
-$("btn-next-turn").addEventListener("click", executeTurn);
+function updateBattleStats(side, fighter) {
+    const prefix = side === "left" ? "fl" : "fr";
+    $(`${prefix}-atk`).textContent = `ATK: ${fighter.atk}`;
+    $(`${prefix}-def`).textContent = `DEF: ${fighter.def}`;
+    $(`${prefix}-spd`).textContent = `SPD: ${fighter.spd}`;
+    $(`${prefix}-sp`).textContent = `SP: ${fighter.sp}%`;
+}
 
 function executeTurn() {
     if (GameState.battle.battleOver) return;
 
     const match = GameState.battle.currentFighters;
     GameState.battle.turnCount++;
+    applyTurnStartEffects(match);
 
-    // Determine initiative (speed check)
     let first, second, firstSide, secondSide;
     if (match.left.spd >= match.right.spd) {
         first = match.left; second = match.right;
@@ -1841,60 +2054,53 @@ function executeTurn() {
         firstSide = "right"; secondSide = "left";
     }
 
-    // First attacker strikes
-    const result1 = calculateAttack(first, second);
-    addBattleLog(result1.log, firstSide);
-    second.currentHp -= result1.damage;
-    updateHP(secondSide, second);
-    animateAttack(firstSide);
-
-    if (result1.isUltimate) {
-        sfxUltimate();
-        showBattleEffect(first.ultimate + "!", first.color);
-    } else {
-        sfxHit();
+    let firstSkipped = !!first.skipNextAttack;
+    let secondSkipped = !!second.skipNextAttack;
+    first.skipNextAttack = false;
+    second.skipNextAttack = false;
+    if (firstSkipped && !secondSkipped) {
+        [first, second] = [second, first];
+        [firstSide, secondSide] = [secondSide, firstSide];
+        [firstSkipped, secondSkipped] = [secondSkipped, firstSkipped];
     }
 
-    const secondCanCounter = second.currentHp > 0 || !second.hasUsedUltimate;
-    if (!secondCanCounter) {
-        second.currentHp = 0;
-        updateHP(secondSide, second);
-        endMatch(first);
+    if (first.currentHp <= 0 || second.currentHp <= 0) {
+        finishBattleTurn(first, second, firstSide, secondSide);
         return;
     }
 
-    setTimeout(() => {
+    if (firstSkipped && secondSkipped) {
+        addBattleLog("⏭️ Both fighters lose their attack this turn.", "blog-announce");
+        finishBattleTurn(first, second, firstSide, secondSide);
+        return;
+    }
+
+    if (firstSkipped) {
+        addBattleLog(`⏭️ ${first.name} loses their attack.`, "blog-announce");
+        finishBattleTurn(first, second, firstSide, secondSide);
+        return;
+    }
+
+    const result1 = calculateAttack(first, second);
+    resolveBattleAttack(first, second, result1, firstSide, secondSide);
+
+    const secondWasSkipped = secondSkipped || !!second.skipNextAttack || result1.skipCounter;
+    if (secondWasSkipped) {
+        second.skipNextAttack = false;
+        addBattleLog(`⏭️ ${second.name} loses their attack.`, "blog-announce");
+    }
+    const secondCanCounter = second.currentHp > 0 && !secondWasSkipped;
+    if (!secondCanCounter) {
+        finishBattleTurn(first, second, firstSide, secondSide);
+        return;
+    }
+
+    battleTurnTimeout = setTimeout(() => {
+        battleTurnTimeout = null;
         const result2 = calculateAttack(second, first);
-        addBattleLog(result2.log, secondSide);
-        first.currentHp -= result2.damage;
-        updateHP(firstSide, first);
-        animateAttack(secondSide);
-
-        if (result2.isUltimate) {
-            sfxUltimate();
-            showBattleEffect(second.ultimate + "!", second.color);
-        } else {
-            sfxHit();
-        }
-
-        const firstDefeated = first.currentHp <= 0;
-        const secondDefeated = second.currentHp <= 0;
-        if (firstDefeated && secondDefeated) {
-            first.currentHp = 0;
-            second.currentHp = 0;
-            updateHP(firstSide, first);
-            updateHP(secondSide, second);
-            endMatch(null);
-        } else if (firstDefeated) {
-            first.currentHp = 0;
-            updateHP(firstSide, first);
-            endMatch(second);
-        } else if (secondDefeated) {
-            second.currentHp = 0;
-            updateHP(secondSide, second);
-            endMatch(first);
-        }
-    }, 600);
+        resolveBattleAttack(second, first, result2, secondSide, firstSide);
+        finishBattleTurn(first, second, firstSide, secondSide);
+    }, BATTLE_MOVE_INTERVAL_MS);
 }
 
 function calculateAttack(attacker, defender) {
@@ -1908,31 +2114,216 @@ function calculateAttack(attacker, defender) {
     };
     const roll = GameState.currentMode === "online" ? seededRoll("attack", 20) : d20();
     const ultimateRoll = GameState.currentMode === "online" ? seededRoll("ultimate", 100) : d100();
-    const isUltimate = !attacker.hasUsedUltimate || ultimateRoll <= attacker.sp;
-    attacker.hasUsedUltimate = true;
-
-    let baseDamage = (attacker.atk + roll) - (defender.def / 2);
+    const isUltimate = ultimateRoll <= attacker.sp;
+    const defenseFactor = attacker.abilityKey === "ignore25Def"
+        ? 0.75
+        : attacker.abilityKey === "ignore20Def" ? 0.8 : 1;
+    let baseDamage = (attacker.atk + roll) - (defender.def * defenseFactor / 2);
     baseDamage = Math.max(1, baseDamage);
 
     let damage = baseDamage;
     let log = "";
+    let copiedDamage = false;
 
-    if (isUltimate) {
+    if (attacker.abilityKey === "copyDamage" && attacker.lastIncomingDamage > 0) {
+        damage = attacker.lastIncomingDamage;
+        copiedDamage = true;
+        log = `🌌 ${attacker.name} copies the enemy's last hit for ${damage} DMG!`;
+    } else if (attacker.abilityKey === "repeatDamage" && attacker.lastIncomingDamage > 0 && !attacker.abilityUsed) {
+        damage += attacker.lastIncomingDamage;
+        attacker.abilityUsed = true;
+        log = `${attacker.name} repeats the enemy's last hit for ${damage} DMG!`;
+    }
+
+    if (!copiedDamage && isUltimate) {
         damage = Math.round(baseDamage * attacker.ultimateMultiplier);
         log = `🌟 ${attacker.name} uses ${attacker.ultimate}! (Roll: ${roll}) → ${damage} DMG!`;
-    } else {
+    } else if (!copiedDamage && !log) {
         damage = Math.round(baseDamage);
         log = `${attacker.name} attacks! (Roll: ${roll}) → ${damage} DMG`;
     }
 
-    // Dodge chance based on speed difference
     const dodgeRoll = GameState.currentMode === "online" ? seededRoll("dodge", 100) : d100();
-    if (!isUltimate && dodgeRoll <= Math.max(0, (defender.spd - attacker.spd) / 2)) {
+    let dodgeChance = isUltimate ? 0 : Math.max(0, (defender.spd - attacker.spd) / 2);
+    if (defender.abilityKey === "foresight" && GameState.battle.turnCount === 1) dodgeChance = Math.max(dodgeChance, 25);
+    if (defender.abilityKey === "dodge15") dodgeChance = Math.max(dodgeChance, 15);
+    if (defender.abilityKey === "dodge12") dodgeChance = Math.max(dodgeChance, 12);
+    if (defender.abilityKey === "gokuDodge" && defender.currentHp < defender.hp * 0.4) dodgeChance = 100;
+    if (dodgeRoll <= dodgeChance) {
         damage = 0;
         log = `💨 ${defender.name} dodges ${attacker.name}'s attack!`;
+    } else if (damage > 0 && defender.abilityKey === "negateHit" && !defender.abilityUsed) {
+        defender.abilityUsed = true;
+        damage = 0;
+        log = `🌀 ${defender.name} negates the hit with ${defender.name === "Gojo" ? "Infinity" : "Teleport Swap"}!`;
     }
 
-    return { damage, log, isUltimate };
+    if (damage > 0) {
+        if (defender.abilityKey === "halveUltimate" && isUltimate) damage = Math.ceil(damage / 2);
+        if (defender.abilityKey === "reduceDamage15") damage = Math.round(damage * 0.85);
+        if (defender.abilityKey === "glassCannon") damage = Math.round(damage * 1.1);
+        if (attacker.abilityKey === "crit25" && (GameState.currentMode === "online" ? seededRoll("critical", 100) : d100()) <= 20) {
+            damage = Math.round(damage * 1.25);
+            log += " Critical hit!";
+        }
+        if (attacker.abilityKey === "crit50" && (GameState.currentMode === "online" ? seededRoll("critical", 100) : d100()) <= 20) {
+            damage = Math.round(damage * 1.5);
+            log += " Thunder critical!";
+        }
+        if ((attacker.abilityKey === "secondSlash" && (GameState.currentMode === "online" ? seededRoll("extra-hit", 100) : d100()) <= 20) ||
+            (attacker.abilityKey === "doubleHit15" && (GameState.currentMode === "online" ? seededRoll("extra-hit", 100) : d100()) <= 15)) {
+            damage += Math.round(baseDamage);
+            log += " Double hit!";
+        }
+    }
+
+    const skipCounter = damage > 0 && attacker.abilityKey === "skipTurn" && !attacker.abilityUsed;
+    if (skipCounter) {
+        attacker.abilityUsed = true;
+        defender.skipNextAttack = true;
+        log += ` ${attacker.name} skips ${defender.name}'s next attack!`;
+    }
+    const applyBurn = damage > 0 && attacker.abilityKey === "burn3";
+    return { damage, log, isUltimate, applyBurn, skipCounter };
+}
+
+function resolveBattleAttack(attacker, defender, result, attackerSide, defenderSide) {
+    addBattleLog(result.log, attackerSide);
+    defender.currentHp = Math.max(0, defender.currentHp - result.damage);
+    if (result.damage > 0) {
+        attacker.lastDamageDealt = result.damage;
+        defender.lastIncomingDamage = result.damage;
+        if (attacker.abilityKey === "stealDef") {
+            const stolen = Math.min(3, defender.def);
+            defender.def -= stolen;
+            attacker.def += stolen;
+        }
+        if (defender.abilityKey === "buffOnHit2") defender.atk += 2;
+        if (defender.abilityKey === "buffDefOnHit") defender.def += 1;
+        if (defender.abilityKey === "lowHpAtk6" && !defender.abilityUsed && defender.currentHp <= defender.hp * 0.35) {
+            defender.atk += 6;
+            defender.abilityUsed = true;
+            addBattleLog(`🔥 ${defender.name} powers up below 35% HP!`, defenderSide);
+        }
+        if (defender.abilityKey === "undoHit" && !defender.abilityUsed) {
+            defender.currentHp = Math.min(defender.hp, defender.currentHp + result.damage);
+            defender.abilityUsed = true;
+            addBattleLog(`⏪ ${defender.name} rewinds the damage from that hit!`, defenderSide);
+        }
+        if (result.applyBurn) {
+            defender.burns = defender.burns || [];
+            defender.burns.push({ damage: 3, turnsLeft: 3 });
+            addBattleLog(`🔥 ${defender.name} is burning for 3 turns!`, attackerSide);
+        }
+    }
+    if (defender.currentHp <= 0 && defender.abilityKey === "revive20" && !defender.abilityUsed) {
+        defender.currentHp = Math.ceil(defender.hp * 0.2);
+        defender.abilityUsed = true;
+        addBattleLog(`🌑 ${defender.name} revives with ${defender.currentHp} HP!`, defenderSide);
+    }
+    updateBattleStats(attackerSide, attacker);
+    updateBattleStats(defenderSide, defender);
+    updateHP(defenderSide, defender);
+    animateAttack(attackerSide);
+    if (result.isUltimate) {
+        sfxUltimate();
+        showBattleEffect(attacker.ultimate + "!", attacker.color);
+    } else if (result.damage > 0) {
+        sfxHit();
+    }
+}
+
+function applyTurnStartEffects(match) {
+    const fighters = [match.left, match.right];
+    const atkLosses = [0, 0];
+    fighters.forEach((fighter, index) => {
+        const opponent = fighters[1 - index];
+        const ability = fighter.abilityKey;
+        if (ability === "regen5") fighter.currentHp = Math.min(fighter.hp, fighter.currentHp + fighter.hp * 0.05);
+        if (ability === "regen4") fighter.currentHp = Math.min(fighter.hp, fighter.currentHp + fighter.hp * 0.04);
+        if (ability === "regen6") fighter.currentHp = Math.min(fighter.hp, fighter.currentHp + 6);
+        if (ability === "growAtk2") fighter.atk += 2;
+        if (ability === "growAtk1") fighter.atk += 1;
+        if (ability === "lowerDef2") opponent.def = Math.max(0, opponent.def - 2);
+        if (ability === "stealAtk") atkLosses[1 - index] += Math.max(1, Math.round(opponent.atk * 0.1));
+        if (ability === "eightGates") {
+            if (!fighter.abilityUsed) {
+                fighter.atk += 6;
+                fighter.abilityUsed = true;
+            }
+            fighter.currentHp = Math.max(0, fighter.currentHp - 5);
+        }
+        if (ability === "buffAtk3" && !fighter.abilityUsed) {
+            fighter.atk += 5;
+            fighter.abilityUsed = true;
+            fighter.atkBuffTurns = 3;
+        }
+        if (ability === "buffDef4" && !fighter.abilityUsed) {
+            fighter.def += 4;
+            fighter.abilityUsed = true;
+            fighter.defBuffTurns = 2;
+        }
+        if (!fighter.battleStarted) {
+            if (ability === "slow10") opponent.spd = Math.max(0, opponent.spd - 10);
+            if (ability === "slow8") opponent.spd = Math.max(0, opponent.spd - 8);
+            fighter.battleStarted = true;
+        }
+    });
+    fighters.forEach((fighter, index) => {
+        if (atkLosses[index]) {
+            fighter.atk = Math.max(1, fighter.atk - atkLosses[index]);
+            fighters[1 - index].atk += atkLosses[index];
+        }
+        updateBattleStats(index === 0 ? "left" : "right", fighter);
+        updateHP(index === 0 ? "left" : "right", fighter);
+    });
+}
+
+function finishBattleTurn(first, second, firstSide, secondSide) {
+    [first, second].forEach((fighter, index) => {
+        fighter.burns = fighter.burns || [];
+        fighter.burns = fighter.burns.filter(burn => {
+            fighter.currentHp = Math.max(0, fighter.currentHp - burn.damage);
+            burn.turnsLeft--;
+            addBattleLog(`🔥 ${fighter.name} takes ${burn.damage} burn damage.`, index === 0 ? firstSide : secondSide);
+            if (fighter.currentHp <= 0 && fighter.abilityKey === "revive20" && !fighter.abilityUsed) {
+                fighter.currentHp = Math.ceil(fighter.hp * 0.2);
+                fighter.abilityUsed = true;
+                addBattleLog(`🌑 ${fighter.name} revives with ${fighter.currentHp} HP!`, index === 0 ? firstSide : secondSide);
+            }
+            return burn.turnsLeft > 0;
+        });
+        if (fighter.atkBuffTurns) {
+            fighter.atkBuffTurns--;
+            if (!fighter.atkBuffTurns) fighter.atk -= 5;
+        }
+        if (fighter.defBuffTurns) {
+            fighter.defBuffTurns--;
+            if (!fighter.defBuffTurns) fighter.def -= 4;
+        }
+        updateBattleStats(index === 0 ? firstSide : secondSide, fighter);
+        updateHP(index === 0 ? firstSide : secondSide, fighter);
+    });
+
+    const firstDefeated = first.currentHp <= 0;
+    const secondDefeated = second.currentHp <= 0;
+    if (firstDefeated && secondDefeated) {
+        first.currentHp = 0;
+        second.currentHp = 0;
+        updateHP(firstSide, first);
+        updateHP(secondSide, second);
+        endMatch(null);
+    } else if (firstDefeated) {
+        first.currentHp = 0;
+        updateHP(firstSide, first);
+        endMatch(second);
+    } else if (secondDefeated) {
+        second.currentHp = 0;
+        updateHP(secondSide, second);
+        endMatch(first);
+    } else if (battleSequenceRunning) {
+        scheduleAutomaticTurn(battleSequenceId);
+    }
 }
 
 function addBattleLog(message, side = "") {
@@ -1970,8 +2361,14 @@ function endMatch(winner) {
     const rightDefeated = match.right.currentHp <= 0;
     if (leftDefeated) $("fighter-left").classList.add("fighter-defeated");
     if (rightDefeated) $("fighter-right").classList.add("fighter-defeated");
-
-    $("btn-next-turn").style.display = "none";
+    if (leftDefeated) {
+        GameState.players[match.left.owner].score = Math.max(0, GameState.players[match.left.owner].score - 1);
+    }
+    if (rightDefeated) {
+        GameState.players[match.right.owner].score = Math.max(0, GameState.players[match.right.owner].score - 1);
+    }
+    $("battle-p1-score").textContent = GameState.players[0].score;
+    $("battle-p2-score").textContent = GameState.players[1].score;
 
     if (leftDefeated && rightDefeated) {
         addBattleLog("💥 DOUBLE K.O.! Both teams send in their next fighter.", "blog-announce");
@@ -1981,25 +2378,17 @@ function endMatch(winner) {
             GameState.battle.nextFighter[0]++;
             GameState.battle.nextFighter[1]++;
             GameState.battle.matches.push({
-                left: { ...nextLeft, currentHp: nextLeft.hp, hasUsedUltimate: false },
-                right: { ...nextRight, currentHp: nextRight.hp, hasUsedUltimate: false },
+                left: { ...nextLeft, currentHp: nextLeft.hp },
+                right: { ...nextRight, currentHp: nextRight.hp },
             });
-            $("btn-next-match").style.display = "inline-flex";
+            continueAutomaticTournament("DOUBLE K.O.! NEXT FIGHTERS UP", true);
         } else {
-            if (nextLeft) GameState.players[0].score++;
-            if (nextRight) GameState.players[1].score++;
-            $("battle-p1-score").textContent = GameState.players[0].score;
-            $("battle-p2-score").textContent = GameState.players[1].score;
-            setTimeout(showVictoryScreen, 1500);
+            continueAutomaticTournament("DOUBLE K.O.! TOURNAMENT OVER", false);
         }
         return;
     }
 
-    const winnerPlayerIdx = winner.owner;
-    GameState.players[winnerPlayerIdx].score++;
-    addBattleLog(`🏆 ${winner.name} WINS! (+1 for ${GameState.players[winnerPlayerIdx].name})`, "blog-announce");
-    $("battle-p1-score").textContent = GameState.players[0].score;
-    $("battle-p2-score").textContent = GameState.players[1].score;
+    addBattleLog(`🏆 ${winner.name} WINS THE ROUND!`, "blog-announce");
 
     const defeated = leftDefeated ? match.left : match.right;
     const defeatedOwner = defeated.owner;
@@ -2007,29 +2396,23 @@ function endMatch(winner) {
     const nextFighter = GameState.battle.rosters[defeatedOwner][nextIndex];
 
     if (!nextFighter) {
-        setTimeout(showVictoryScreen, 1500);
+        continueAutomaticTournament(`${winner.name} WINS!`, false);
     } else {
         GameState.battle.nextFighter[defeatedOwner] += 1;
         const replacement = {
             ...nextFighter,
             currentHp: nextFighter.hp,
-            hasUsedUltimate: false,
         };
         GameState.battle.matches.push(defeatedOwner === 0
             ? { left: replacement, right: winner }
             : { left: winner, right: replacement });
-        $("btn-next-match").style.display = "inline-flex";
+        continueAutomaticTournament(`${winner.name} WINS!`, true);
     }
 }
 
-$("btn-next-match").addEventListener("click", () => {
-    sfxBid();
-    GameState.battle.matchIndex++;
-    setupMatch();
-});
-
 // ==================== VICTORY SCREEN ====================
 function showVictoryScreen() {
+    battleSequenceRunning = false;
     const p1 = GameState.players[0];
     const p2 = GameState.players[1];
 
@@ -2046,7 +2429,7 @@ function showVictoryScreen() {
     }
 
     $("victory-title").textContent = winnerName === "IT'S A TIE" ? "IT'S A TIE!" : `${winnerName} WINS!`;
-    $("victory-subtitle").textContent = `Final Score: ${finalScore}`;
+    $("victory-subtitle").textContent = `GAME OVER · Fighters Standing: ${finalScore}`;
 
     // Stats summary
     $("victory-stats").innerHTML = `

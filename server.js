@@ -83,6 +83,7 @@ function serializeStoredRoom(room) {
     })),
     started: room.started,
     auctionComplete: !!room.auctionComplete,
+    battleStarted: !!room.battleStarted,
     auctionRoundId: room.auctionRoundId || 0,
     auction: room.auction ? {
       pool: room.auction.pool,
@@ -229,6 +230,7 @@ function serializeRoom(room, socketId) {
     status: room.started ? 'auction' : connectedPlayers >= 2 ? 'ready' : 'waiting',
     started: !!room.started,
     auctionComplete: !!room.auctionComplete,
+    battleStarted: !!room.battleStarted,
     auctionRoundId: room.auctionRoundId || 0,
     myPlayerIndex: room.players.findIndex(player => player.socketId === socketId),
     auction: room.auction ? {
@@ -288,6 +290,7 @@ async function resolveAuctionRound(room) {
 async function beginAuction(room) {
   room.started = true;
   room.auctionComplete = false;
+  room.battleStarted = false;
   room.auctionRoundId = (room.auctionRoundId || 0) + 1;
   room.auction = {
     pool: createUniquePool(),
@@ -355,6 +358,7 @@ io.on('connection', (socket) => {
       players: [],
       started: false,
       auctionComplete: false,
+      battleStarted: false,
       auctionRoundId: 0,
       auction: null,
     };
@@ -514,6 +518,45 @@ io.on('connection', (socket) => {
       console.error(`Could not start auction in room ${room.code}:`, error);
       acknowledge(ack, { ok: false, message: 'Could not start the auction. Please try again.' });
     }
+  });
+
+  socket.on('online:startBattle', async ({ roomCode } = {}, ack) => {
+    const room = getRoom((roomCode || '').toUpperCase());
+    const player = room?.players.find(candidate => candidate.socketId === socket.id);
+    if (!room || !player) {
+      acknowledge(ack, { ok: false, message: 'You are no longer connected to this room.' });
+      return;
+    }
+    if (!room.auctionComplete) {
+      acknowledge(ack, { ok: false, message: 'The auction must finish before the tournament can start.' });
+      return;
+    }
+    if (room.players.length !== 2 || !room.players.every(candidate => candidate.socketId)) {
+      acknowledge(ack, { ok: false, message: 'Both players must be connected before the tournament can start.' });
+      return;
+    }
+    if (room.battleStarted) {
+      acknowledge(ack, { ok: true, roomCode: room.code, alreadyStarted: true });
+      socket.emit('battle:start', { roomCode: room.code });
+      return;
+    }
+
+    room.battleStarted = true;
+    try {
+      await persistRoom(room);
+    } catch (error) {
+      room.battleStarted = false;
+      logRoomStoreError(error);
+      acknowledge(ack, { ok: false, message: 'Could not start the tournament. Please try again.' });
+      return;
+    }
+
+    acknowledge(ack, { ok: true, roomCode: room.code });
+    room.players.forEach(candidate => {
+      if (candidate.socketId) {
+        io.to(candidate.socketId).emit('battle:start', { roomCode: room.code });
+      }
+    });
   });
 
   socket.on('online:leaveRoom', async ({ roomCode, playerId } = {}, ack) => {

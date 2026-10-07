@@ -206,7 +206,10 @@
                         <div class="card-stats card-stats-power">
                             <div class="stat stat-power-wide"><span class="stat-label">Power Level</span><span class="stat-value" id="card-power">0</span></div>
                         </div>
+                        <div class="card-battle-stats" id="card-battle-stats"></div>
+                        <div class="card-ultimate" id="card-ultimate"></div>
                         <div class="card-tags" id="card-tags"></div>
+                        <div class="card-ability" id="card-ability"></div>
                         <div class="card-result-overlay hidden" id="card-result-overlay">
                             <div class="card-result-text" id="card-result-text"></div>
                         </div>
@@ -254,6 +257,9 @@
                 <div class="power-flash-card" id="power-flash-card">
                     <div class="power-flash-avatar char-avatar char-avatar-lg" id="power-flash-avatar"></div>
                     <div class="power-flash-name" id="power-flash-name">Character</div>
+                    <div class="power-flash-combat-stats" id="power-flash-combat-stats"></div>
+                    <div class="power-flash-ultimate" id="power-flash-ultimate"></div>
+                    <div class="power-flash-ability" id="power-flash-ability"></div>
                     <div class="power-flash-value" id="power-flash-value">0</div>
                     <div class="power-flash-pl-label">POWER LEVEL</div>
                 </div>
@@ -304,7 +310,7 @@
                     </div>
                 </div>
                 <div class="power-winner-banner hidden" id="power-winner-banner">
-                    <span id="power-winner-text">PLAYER 1 WINS!</span>
+                    <span id="power-winner-text">PLAYER HAS THE HIGHEST OVERALL POWER LEVEL!</span>
                 </div>
                 <button id="btn-power-continue" class="btn btn-primary btn-glow hidden">
                     <span class="btn-text">CONTINUE →</span>
@@ -373,6 +379,7 @@
                 <span class="match-number" id="battle-match-num">FIGHT 1</span>
             </div>
             <div class="battle-score">
+                <span class="battle-standing-label">STANDING</span>
                 <span class="score p1-score" id="battle-p1-score">0</span>
                 <span class="score-dash">—</span>
                 <span class="score p2-score" id="battle-p2-score">0</span>
@@ -401,11 +408,6 @@
             <div class="battle-center">
                 <div class="battle-vs-text">⚔️</div>
                 <div class="battle-log" id="battle-log"></div>
-                <button id="btn-next-turn" class="btn btn-secondary">NEXT TURN →</button>
-                <button id="btn-next-match" class="btn btn-primary btn-glow" style="display:none;">
-                    <span class="btn-text">NEXT MATCH →</span>
-                    <span class="btn-shine"></span>
-                </button>
             </div>
 
             <div class="fighter fighter-right" id="fighter-right">
@@ -428,7 +430,27 @@
         </div>
 
         <!-- Battle effect overlay -->
-        <div class="battle-effect" id="battle-effect"></div>
+        <div class="battle-effect" id="battle-effect">        </div>
+
+        <div class="battle-match-intro" id="battle-match-intro" aria-live="assertive" aria-hidden="true">
+            <div class="battle-intro-content">
+                <div class="battle-intro-round" id="battle-intro-round"></div>
+                <div class="battle-intro-matchup">
+                    <div class="battle-intro-fighter">
+                        <div class="battle-intro-owner" id="battle-intro-left-owner"></div>
+                        <div class="battle-intro-avatar" id="battle-intro-left-avatar"></div>
+                        <div class="battle-intro-name" id="battle-intro-left-name"></div>
+                    </div>
+                    <div class="battle-intro-vs">VS</div>
+                    <div class="battle-intro-fighter">
+                        <div class="battle-intro-owner" id="battle-intro-right-owner"></div>
+                        <div class="battle-intro-avatar" id="battle-intro-right-avatar"></div>
+                        <div class="battle-intro-name" id="battle-intro-right-name"></div>
+                    </div>
+                </div>
+                <div class="battle-intro-call" id="battle-intro-call"></div>
+            </div>
+        </div>
     </section>
 
     <!-- ======================== SCREEN: VICTORY ======================== -->
@@ -439,7 +461,7 @@
                 <div class="trophy-icon">🏆</div>
             </div>
             <h2 class="victory-title" id="victory-title">PLAYER 1 WINS!</h2>
-            <p class="victory-subtitle" id="victory-subtitle">Final Score: 3 - 1</p>
+            <p class="victory-subtitle" id="victory-subtitle">GAME OVER · Fighters Standing: 3 - 1</p>
             <div class="victory-stats" id="victory-stats"></div>
             <button id="btn-play-again" class="btn btn-primary btn-glow">
                 <span class="btn-text">PLAY AGAIN</span>

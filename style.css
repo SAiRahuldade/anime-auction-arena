@@ -1566,6 +1566,28 @@ body {
     margin-bottom: 1rem;
 }
 
+.power-flash-combat-stats {
+    color: var(--cyan);
+    font-size: 0.72rem;
+    line-height: 1.5;
+    margin: 0.35rem 0;
+}
+
+.power-flash-ultimate {
+    color: var(--gold);
+    font-size: 0.82rem;
+    font-weight: 700;
+    line-height: 1.4;
+    margin-top: 0.45rem;
+}
+
+.power-flash-ability {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    line-height: 1.45;
+    margin-top: 0.35rem;
+}
+
 .power-flash-value {
     font-family: 'Orbitron', sans-serif;
     font-size: 3rem;
@@ -1964,6 +1986,43 @@ body {
     margin-top: 0.2rem;
 }
 
+.tc-ability {
+    grid-column: span 2;
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.card-ability {
+    min-height: 2.4em;
+    margin-top: 0.45rem;
+    color: var(--cyan);
+    font-size: 0.75rem;
+    line-height: 1.4;
+}
+
+.card-battle-stats {
+    color: var(--cyan);
+    font-size: 0.68rem;
+    line-height: 1.5;
+    margin: 0.4rem 0;
+}
+
+.card-ultimate {
+    color: var(--gold);
+    font-size: 0.78rem;
+    font-weight: 600;
+    line-height: 1.4;
+    margin: 0.35rem 0;
+}
+
+.tc-combat-stats {
+    grid-column: span 2;
+    color: var(--cyan);
+    font-size: 0.62rem;
+    line-height: 1.4;
+}
+
 /* ==================== SYNERGIES ==================== */
 .team-synergies h4 {
     font-size: 0.75rem;
@@ -2174,6 +2233,14 @@ body {
     font-weight: 500;
 }
 
+.battle-standing-label {
+    color: var(--text-muted);
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
 /* Fighter animations */
 .fighter.attacking .fighter-avatar {
     animation: attackLunge 0.4s ease;
@@ -2225,6 +2292,125 @@ body {
     gap: 0.75rem;
     min-width: 280px;
     flex: 1;
+}
+
+.battle-match-intro {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(3, 3, 18, 0.94);
+    backdrop-filter: blur(14px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+}
+
+.battle-match-intro.show {
+    opacity: 1;
+    visibility: visible;
+}
+
+.battle-intro-content {
+    width: min(900px, 100%);
+    text-align: center;
+}
+
+.battle-intro-round {
+    color: var(--gold);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1rem, 3vw, 1.6rem);
+    font-weight: 800;
+    letter-spacing: 0.18em;
+    margin-bottom: 1.5rem;
+}
+
+.battle-intro-matchup {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: clamp(0.75rem, 4vw, 3rem);
+    animation: battleRevealIn 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.battle-intro-fighter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    width: min(35vw, 240px);
+}
+
+.battle-intro-owner {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.battle-intro-avatar {
+    filter: drop-shadow(0 0 24px rgba(168, 85, 247, 0.55));
+}
+
+.battle-intro-avatar-image {
+    width: min(28vw, 160px);
+    height: min(28vw, 160px);
+}
+
+.battle-intro-fighter:last-child .battle-intro-avatar {
+    filter: drop-shadow(0 0 24px rgba(236, 72, 153, 0.55));
+}
+
+.battle-intro-name {
+    max-width: 100%;
+    color: white;
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(0.85rem, 2.5vw, 1.35rem);
+    font-weight: 800;
+    overflow-wrap: anywhere;
+}
+
+.battle-intro-vs {
+    color: var(--gold);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.5rem, 5vw, 3rem);
+    font-weight: 900;
+    text-shadow: 0 0 24px rgba(251, 191, 36, 0.65);
+}
+
+.battle-intro-call {
+    min-height: 2em;
+    margin-top: 1.25rem;
+    color: var(--gold);
+    font-family: 'Orbitron', sans-serif;
+    font-size: clamp(1.3rem, 5vw, 2.7rem);
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-shadow: 0 0 24px rgba(251, 191, 36, 0.7);
+}
+
+.battle-match-intro.is-winner .battle-intro-matchup {
+    display: none;
+}
+
+.battle-match-intro.is-winner .battle-intro-call {
+    color: #fbbf24;
+    animation: winnerCallout 0.65s ease both;
+}
+
+@keyframes battleRevealIn {
+    from { opacity: 0; transform: translateY(24px) scale(0.9); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes winnerCallout {
+    0% { opacity: 0; transform: scale(0.65); }
+    70% { opacity: 1; transform: scale(1.12); }
+    100% { opacity: 1; transform: scale(1); }
 }
 
 .battle-vs-text {
