@@ -61,6 +61,61 @@ function getRoom(roomCode) {
   return rooms.get(roomCode);
 }
 
+function acknowledge(ack, response) {
+  if (typeof ack === 'function') {
+    ack(response);
+  }
+}
+
+function expireDisconnectedPlayer(room, player) {
+  if (player.socketId) return;
+  player.reconnectTimer = null;
+  room.players = room.players.filter(candidate => candidate !== player);
+  if (room.started && room.players.length < 2) {
+    if (room.auction?.timer) {
+      clearInterval(room.auction.timer);
+    }
+    room.started = false;
+    room.auction = null;
+  }
+  if (room.players.length === 0) {
+    rooms.delete(room.code);
+  } else {
+    emitRoomState(room);
+  }
+}
+
+function reserveDisconnectedPlayer(room, player) {
+  player.socketId = null;
+  if (room.started && room.auction?.timer) {
+    clearInterval(room.auction.timer);
+    room.auction.timer = null;
+  }
+  if (player.reconnectTimer) clearTimeout(player.reconnectTimer);
+  player.reconnectTimer = setTimeout(() => expireDisconnectedPlayer(room, player), 5 * 60 * 1000);
+  emitRoomState(room);
+}
+
+function attachPlayer(room, player, socket) {
+  const previousRoomCode = socket.data.roomCode;
+  if (previousRoomCode && previousRoomCode !== room.code) {
+    const previousRoom = getRoom(previousRoomCode);
+    const previousPlayer = previousRoom?.players.find(candidate => candidate.socketId === socket.id);
+    if (previousRoom && previousPlayer) {
+      socket.leave(previousRoom.code);
+      reserveDisconnectedPlayer(previousRoom, previousPlayer);
+    }
+  }
+  if (player.reconnectTimer) {
+    clearTimeout(player.reconnectTimer);
+    player.reconnectTimer = null;
+  }
+  player.socketId = socket.id;
+  socket.join(room.code);
+  socket.data.roomCode = room.code;
+  socket.data.playerIndex = room.players.indexOf(player);
+}
+
 function serializeRoom(room, socketId) {
   const players = room.players.map((player, index) => ({
     id: player.socketId,
@@ -70,12 +125,14 @@ function serializeRoom(room, socketId) {
     teamCount: player.team.length,
     score: player.score,
     isMe: player.socketId === socketId,
+    isConnected: !!player.socketId,
   }));
+  const connectedPlayers = room.players.filter(player => player.socketId).length;
 
   return {
     roomCode: room.code,
     players,
-    status: room.started ? 'auction' : room.players.length >= 2 ? 'ready' : 'waiting',
+    status: room.started ? 'auction' : connectedPlayers >= 2 ? 'ready' : 'waiting',
     started: !!room.started,
     myPlayerIndex: room.players.findIndex(player => player.socketId === socketId),
     auction: room.auction ? {
@@ -94,6 +151,7 @@ function serializeRoom(room, socketId) {
 
 function emitRoomState(room) {
   room.players.forEach((player) => {
+    if (!player.socketId) return;
     const payload = serializeRoom(room, player.socketId);
     io.to(player.socketId).emit('room:state', payload);
   });
@@ -149,9 +207,11 @@ function beginAuction(room) {
 
   emitRoomState(room);
 
-  if (room.auction.timer) {
-    clearInterval(room.auction.timer);
-  }
+  startAuctionTimer(room);
+}
+
+function startAuctionTimer(room) {
+  if (!room.auction || room.auction.timer) return;
 
   room.auction.timer = setInterval(() => {
     if (!room.auction || !room.started) return;
@@ -170,7 +230,12 @@ app.get('/health', (_req, res) => {
 });
 
 io.on('connection', (socket) => {
-  socket.on('online:createRoom', ({ name } = {}, acknowledge) => {
+  socket.on('online:createRoom', ({ name, playerId } = {}, ack) => {
+    if (!playerId) {
+      acknowledge(ack, { ok: false, message: 'Player identity is missing. Refresh and try again.' });
+      return;
+    }
+
     let roomCode = randomCode();
     while (rooms.has(roomCode)) {
       roomCode = randomCode();
@@ -182,28 +247,47 @@ io.on('connection', (socket) => {
       auction: null,
     };
 
-    socket.join(roomCode);
-    room.players.push({
-      socketId: socket.id,
+    const player = {
+      playerId,
+      socketId: null,
       name: (name || 'Player').trim() || 'Player',
       budget: 30,
       team: [],
       score: 0,
-    });
+      reconnectTimer: null,
+    };
+    room.players.push(player);
     rooms.set(roomCode, room);
 
-    socket.data.roomCode = roomCode;
-    socket.data.playerIndex = 0;
-    if (typeof acknowledge === 'function') {
-      acknowledge({ ok: true, roomCode });
-    }
+    attachPlayer(room, player, socket);
+    acknowledge(ack, { ok: true, roomCode });
     emitRoomState(room);
   });
 
-  socket.on('online:joinRoom', ({ roomCode, name } = {}, acknowledge) => {
+  socket.on('online:reconnect', ({ roomCode, playerId } = {}, ack) => {
+    const room = getRoom((roomCode || '').toUpperCase());
+    const player = room?.players.find(candidate => candidate.playerId === playerId);
+    if (!room || !player) {
+      acknowledge(ack, { ok: false, message: 'This room is no longer available. Create a new room or ask your friend for a new code.' });
+      return;
+    }
+    if (player.socketId && player.socketId !== socket.id) {
+      acknowledge(ack, { ok: false, message: 'This player is already connected to the room.' });
+      return;
+    }
+
+    attachPlayer(room, player, socket);
+    if (room.started && room.players.every(candidate => candidate.socketId)) {
+      startAuctionTimer(room);
+    }
+    acknowledge(ack, { ok: true, roomCode: room.code });
+    emitRoomState(room);
+  });
+
+  socket.on('online:joinRoom', ({ roomCode, name, playerId } = {}, ack) => {
     const reject = (message) => {
-      if (typeof acknowledge === 'function') {
-        acknowledge({ ok: false, message });
+      if (typeof ack === 'function') {
+        acknowledge(ack, { ok: false, message });
       } else {
         socket.emit('room:error', { message });
       }
@@ -211,6 +295,24 @@ io.on('connection', (socket) => {
     const room = getRoom((roomCode || '').toUpperCase());
     if (!room) {
       reject('Room not found. Check the code and try again.');
+      return;
+    }
+
+    const existingPlayer = room.players.find(player => player.playerId === playerId);
+    if (existingPlayer) {
+      if (existingPlayer.socketId && existingPlayer.socketId !== socket.id) {
+        reject('This player is already connected to the room.');
+        return;
+      }
+      attachPlayer(room, existingPlayer, socket);
+      acknowledge(ack, { ok: true, roomCode: room.code });
+      if (room.started && room.players.every(player => player.socketId)) startAuctionTimer(room);
+      emitRoomState(room);
+      return;
+    }
+
+    if (!playerId) {
+      reject('Player identity is missing. Refresh and try again.');
       return;
     }
 
@@ -224,22 +326,20 @@ io.on('connection', (socket) => {
       return;
     }
 
-    socket.join(room.code);
-    room.players.push({
-      socketId: socket.id,
+    const player = {
+      playerId,
+      socketId: null,
       name: (name || 'Player 2').trim() || 'Player 2',
       budget: 30,
       team: [],
       score: 0,
-    });
+      reconnectTimer: null,
+    };
+    room.players.push(player);
+    attachPlayer(room, player, socket);
 
-    socket.data.roomCode = room.code;
-    socket.data.playerIndex = room.players.length - 1;
-
-    if (typeof acknowledge === 'function') {
-      acknowledge({ ok: true, roomCode: room.code });
-    }
-    if (room.players.length === 2) {
+    acknowledge(ack, { ok: true, roomCode: room.code });
+    if (room.players.length === 2 && room.players.every(candidate => candidate.socketId)) {
       beginAuction(room);
     } else {
       emitRoomState(room);
@@ -286,22 +386,9 @@ io.on('connection', (socket) => {
     const room = getRoom(roomCode);
     if (!room) return;
 
-    room.players = room.players.filter(player => player.socketId !== socket.id);
-
-    if (room.players.length === 0) {
-      rooms.delete(roomCode);
-      return;
-    }
-
-    if (room.started && room.players.length < 2) {
-      if (room.auction?.timer) {
-        clearInterval(room.auction.timer);
-      }
-      room.started = false;
-      room.auction = null;
-    }
-
-    emitRoomState(room);
+    const player = room.players.find(candidate => candidate.socketId === socket.id);
+    if (!player) return;
+    reserveDisconnectedPlayer(room, player);
   });
 });
 

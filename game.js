@@ -57,8 +57,25 @@ const CHARACTER_THEME_MAP = {
 };
 
 const PLAYER_NAME_KEY = "aaa_player_name";
+const ONLINE_PLAYER_ID_KEY = "aaa_online_player_id";
+const ONLINE_ROOM_CODE_KEY = "aaa_online_room_code";
 let activeCharacterTheme = null;
 let backgroundMusic = null;
+let pendingRoomAction = null;
+let roomRequestPending = false;
+
+function getOnlinePlayerId() {
+    let playerId = sessionStorage.getItem(ONLINE_PLAYER_ID_KEY);
+    if (!playerId) {
+        playerId = window.crypto?.randomUUID
+            ? window.crypto.randomUUID()
+            : `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        sessionStorage.setItem(ONLINE_PLAYER_ID_KEY, playerId);
+    }
+    return playerId;
+}
+
+const onlinePlayerId = getOnlinePlayerId();
 
 function fillPlayerSetupFromSavedName() {
     const savedName = localStorage.getItem(PLAYER_NAME_KEY);
@@ -140,6 +157,12 @@ function playBackgroundMusic() {
     backgroundMusic.play().catch((error) => {
         console.warn("Background music could not be played.", error);
     });
+}
+
+function stopBackgroundMusic() {
+    if (!backgroundMusic) return;
+    backgroundMusic.pause();
+    backgroundMusic.currentTime = 0;
 }
 
 function playCharacterTheme(char) {
@@ -529,11 +552,34 @@ function sfxXTierReveal() {
 if (socket) {
     socket.on("connect", () => {
         GameState.online.connected = true;
+        const status = $("online-room-status");
+        if (pendingRoomAction) {
+            const pending = pendingRoomAction;
+            pendingRoomAction = null;
+            sendOnlineRoomAction(pending.action, pending.payload);
+            return;
+        }
+
+        const roomCode = GameState.online.roomCode || localStorage.getItem(ONLINE_ROOM_CODE_KEY);
+        if (roomCode) {
+            status.textContent = "Reconnected. Restoring your room...";
+            socket.timeout(10000).emit("online:reconnect", { roomCode, playerId: onlinePlayerId }, (error, response) => {
+                if (error) {
+                    status.textContent = "Connected, but the room could not be restored. Create a new room or rejoin with a valid code.";
+                } else if (!response?.ok) {
+                    status.textContent = response?.message || "Connected, but the room could not be restored. Create a new room or rejoin.";
+                }
+            });
+        } else if (status.textContent.includes("Can't connect") || status.textContent.includes("Disconnected")) {
+            status.textContent = "Connected to the game server. You can create or join a room.";
+        }
     });
 
     socket.on("connect_error", () => {
         GameState.online.connected = false;
-        $("online-room-status").textContent = "Can't connect to the game server yet. It may be waking up; retrying...";
+        if (!socket.connected) {
+            $("online-room-status").textContent = "Can't connect to the game server yet. It may be waking up; retrying...";
+        }
     });
 
     socket.on("disconnect", () => {
@@ -544,17 +590,27 @@ if (socket) {
     });
 
     socket.on("room:state", (state) => {
+        const auctionWasStarted = GameState.online.state?.started;
         GameState.online.roomCode = state.roomCode || "";
         GameState.online.myPlayerIndex = state.myPlayerIndex;
         GameState.online.state = state;
+        localStorage.setItem(ONLINE_ROOM_CODE_KEY, state.roomCode || "");
         $("room-code-input").value = state.roomCode || $("room-code-input").value;
 
-        if (state.players && state.players.length >= 2) {
+        if (state.started) {
+            stopBackgroundMusic();
+        } else if (auctionWasStarted && !state.started) {
+            playBackgroundMusic();
+        }
+
+        if (state.started && state.players?.length >= 2 && state.players.every(player => player.isConnected)) {
             GameState.players[0].name = state.players[0]?.name || GameState.players[0].name;
             GameState.players[1].name = state.players[1]?.name || GameState.players[1].name;
             $("p1-name").value = GameState.players[0].name;
             $("p2-name").value = GameState.players[1].name;
             $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
+        } else if (state.players?.some(player => !player.isConnected)) {
+            $("online-room-status").textContent = `Room ${state.roomCode}: a player disconnected. Waiting for them to reconnect...`;
         } else {
             $("online-room-status").textContent = `Room ${state.roomCode} created. Share this code and wait for your friend.`;
         }
@@ -644,15 +700,31 @@ function startOnlineRoomFlow(action) {
     }
 
     const isCreating = action === "create";
-    const event = isCreating ? "online:createRoom" : "online:joinRoom";
     const payload = isCreating
-        ? { name: playerName }
-        : { roomCode: roomCodeInput, name: playerName };
-    $("online-room-status").textContent = `${socket.connected ? "" : "Connecting to the game server... "}${isCreating ? "Creating room..." : `Joining room ${roomCodeInput}...`}`;
+        ? { name: playerName, playerId: onlinePlayerId }
+        : { roomCode: roomCodeInput, name: playerName, playerId: onlinePlayerId };
+    if (!socket.connected) {
+        pendingRoomAction = { action, payload };
+        $("online-room-status").textContent = "Connecting to the game server... Your room request will be sent when connected.";
+        socket.connect();
+        return;
+    }
+    sendOnlineRoomAction(action, payload);
+}
 
-    socket.timeout(120000).emit(event, payload, (error, response) => {
+function sendOnlineRoomAction(action, payload) {
+    if (roomRequestPending) return;
+    const isCreating = action === "create";
+    const event = isCreating ? "online:createRoom" : "online:joinRoom";
+    roomRequestPending = true;
+    $("online-room-status").textContent = isCreating ? "Creating room..." : `Joining room ${payload.roomCode}...`;
+
+    socket.timeout(20000).emit(event, payload, (error, response) => {
+        roomRequestPending = false;
         if (error) {
-            $("online-room-status").textContent = "The server didn't respond after two minutes. Check your connection and try again.";
+            $("online-room-status").textContent = socket.connected
+                ? "The server didn't respond. Please try again."
+                : "Disconnected while waiting for the server. Reconnecting; try again when connected.";
             return;
         }
         if (!response?.ok) {
@@ -661,7 +733,12 @@ function startOnlineRoomFlow(action) {
         }
         if (isCreating && response.roomCode) {
             $("room-code-input").value = response.roomCode;
+            GameState.online.roomCode = response.roomCode;
+            localStorage.setItem(ONLINE_ROOM_CODE_KEY, response.roomCode);
             $("online-room-status").textContent = `Room ${response.roomCode} created. Share this code and wait for your friend.`;
+        } else if (response.roomCode) {
+            GameState.online.roomCode = response.roomCode;
+            localStorage.setItem(ONLINE_ROOM_CODE_KEY, response.roomCode);
         }
     });
 }
@@ -691,6 +768,8 @@ $("btn-start-auction").addEventListener("click", () => {
 
 // ==================== AUCTION ENGINE ====================
 function startAuction() {
+    stopBackgroundMusic();
+
     // Pick 20 characters from the pool based on tier rarity
     const tierWeights = { "X": 8, "SSS": 12, "S": 15, "A": 18, "B": 24, "C": 28 };
     let weightedPool = [];
@@ -1147,6 +1226,8 @@ document.addEventListener("keydown", (e) => {
 
 // ==================== END AUCTION / TEAM REVIEW ====================
 function endAuction() {
+    playBackgroundMusic();
+
     const anyWon = GameState.players.some(player => player.team.length > 0);
 
     if (!anyWon) {
@@ -1818,6 +1899,12 @@ $("btn-play-again").addEventListener("click", () => {
     resetGameState();
     localStorage.removeItem("aaa_save");
     showScreen("screen-lobby");
+});
+
+$("btn-home").addEventListener("click", () => {
+    resetGameState();
+    localStorage.removeItem("aaa_save");
+    showScreen("screen-mode-select");
 });
 
 // ==================== SAVE / LOAD (localStorage) ====================

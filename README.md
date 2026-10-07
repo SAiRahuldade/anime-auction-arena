@@ -29,7 +29,7 @@ The app listens on the PORT environment variable automatically.
 
 - One player creates a room.
 - The second player joins using the room code.
-- The auction room syncs live through Socket.IO.
+- The auction room syncs live through Socket.IO. If a player briefly disconnects, their seat is reserved for five minutes while they reconnect.
 
 ## Background music
 
