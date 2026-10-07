@@ -478,6 +478,43 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('online:leaveRoom', async ({ roomCode, playerId } = {}, ack) => {
+    const room = getRoom((roomCode || '').toUpperCase());
+    const player = room?.players.find(candidate =>
+      candidate.playerId === playerId && candidate.socketId === socket.id
+    );
+    if (!room || !player) {
+      acknowledge(ack, { ok: true });
+      return;
+    }
+
+    if (player.reconnectTimer) clearTimeout(player.reconnectTimer);
+    room.players = room.players.filter(candidate => candidate !== player);
+    socket.leave(room.code);
+    socket.data.roomCode = null;
+    socket.data.playerIndex = null;
+
+    if (room.started) {
+      if (room.auction?.timer) clearInterval(room.auction.timer);
+      room.started = false;
+      room.auction = null;
+    }
+
+    try {
+      if (room.players.length === 0) {
+        rooms.delete(room.code);
+        await deleteStoredRoom(room.code);
+      } else {
+        await persistRoom(room);
+        emitRoomState(room);
+      }
+      acknowledge(ack, { ok: true });
+    } catch (error) {
+      logRoomStoreError(error);
+      acknowledge(ack, { ok: false, message: 'Could not leave the room cleanly.' });
+    }
+  });
+
   socket.on('auction:bid', async ({ roomCode, amount, playerIndex }) => {
     try {
       const room = getRoom((roomCode || '').toUpperCase());

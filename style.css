@@ -58,6 +58,7 @@
 html {
     font-size: 16px;
     scroll-behavior: smooth;
+    overflow-x: clip;
 }
 
 body {
@@ -2468,6 +2469,71 @@ body {
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 
+.home-button {
+    position: fixed;
+    top: 1rem;
+    left: 1rem;
+    z-index: 200;
+    min-height: 44px;
+    padding: 0 1rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    border: 1px solid rgba(168, 85, 247, 0.3);
+    border-radius: 999px;
+    background: var(--bg-glass);
+    backdrop-filter: blur(15px);
+    -webkit-backdrop-filter: blur(15px);
+    color: var(--text-primary);
+    font: 700 0.72rem 'Orbitron', sans-serif;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+}
+
+.home-button span {
+    font-size: 1.2rem;
+}
+
+.home-button:hover {
+    border-color: var(--purple);
+    box-shadow: 0 0 15px var(--purple-glow);
+}
+
+.home-confirm-dialog {
+    width: min(420px, calc(100vw - 2rem));
+    margin: auto;
+    padding: 1.5rem;
+    border: 1px solid rgba(168, 85, 247, 0.35);
+    border-radius: var(--radius-lg);
+    background: #111128;
+    color: var(--text-primary);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+}
+
+.home-confirm-dialog::backdrop {
+    background: rgba(3, 3, 15, 0.78);
+    backdrop-filter: blur(5px);
+}
+
+.home-confirm-dialog h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.15rem;
+    margin-bottom: 0.75rem;
+}
+
+.home-confirm-dialog p {
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.home-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-top: 1.5rem;
+}
+
 .sound-toggle:hover {
     border-color: var(--purple);
     box-shadow: 0 0 15px var(--purple-glow);
@@ -2653,4 +2719,242 @@ body {
     }
 
     .char-avatar-sm { width: 36px; height: 36px; }
+}
+
+/* ==================== SMALL-SCREEN LAYOUT ==================== */
+@media (max-width: 768px) {
+    .screen {
+        width: 100%;
+        min-height: 100vh;
+        min-height: 100svh;
+        padding: 5rem 1rem 1.25rem;
+        justify-content: flex-start;
+    }
+
+    #screen-title {
+        justify-content: center;
+        padding-top: 5rem;
+        overflow-x: clip;
+    }
+
+    .screen-header {
+        width: 100%;
+        margin-bottom: 1.25rem;
+    }
+
+    .screen-title-text {
+        font-size: clamp(1.25rem, 5vw, 2rem);
+        line-height: 1.25;
+    }
+
+    .screen-subtitle {
+        font-size: 0.9rem;
+    }
+
+    .mode-select-grid {
+        grid-template-columns: 1fr;
+        width: min(100%, 480px);
+        gap: 0.75rem;
+    }
+
+    .mode-btn {
+        min-height: 112px;
+        padding: 1rem;
+    }
+
+    .lobby-container {
+        width: min(100%, 520px);
+        flex-direction: row;
+        align-items: stretch;
+        gap: 0.6rem;
+    }
+
+    .player-setup {
+        width: auto;
+        min-width: 0;
+        flex: 1;
+        padding: 0.9rem;
+    }
+
+    .player-setup .input-field {
+        min-width: 0;
+        padding-inline: 0.55rem;
+        font-size: 0.9rem;
+    }
+
+    .lobby-container > .vs-divider {
+        padding-inline: 0;
+        font-size: 1rem;
+    }
+
+    .online-room-panel {
+        width: min(100%, 520px);
+        padding: 1rem;
+    }
+
+    .online-room-actions {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .online-room-actions .input-field {
+        grid-column: 1 / -1;
+        width: 100%;
+    }
+
+    .auction-header {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 0.3rem;
+        padding: 0.7rem 0.45rem;
+    }
+
+    .auction-player-info {
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    .ap-name { font-size: 0.65rem; }
+    .ap-budget { font-size: 1rem; }
+    .ap-cards { font-size: 0.65rem; }
+    .round-number { font-size: 0.95rem; }
+
+    .auction-stage {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 0.65rem;
+    }
+
+    .center-stage-column {
+        grid-column: 1 / -1;
+        grid-row: 1;
+        width: 100%;
+        gap: 0.65rem;
+    }
+
+    .bid-column {
+        min-width: 0;
+        padding: 0.55rem;
+    }
+
+    .player-bid-status {
+        padding: 0.6rem 0.35rem;
+    }
+
+    .pbs-name { font-size: 0.62rem; overflow-wrap: anywhere; }
+    .pbs-label { font-size: 0.52rem; letter-spacing: 1px; }
+    .pbs-amount { font-size: 1.25rem; }
+    .pbs-state { font-size: 0.6rem; }
+
+    .bid-buttons {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.3rem;
+    }
+
+    .btn-bid, .btn-bid-pass {
+        min-height: 40px;
+        padding: 0.45rem 0.25rem;
+        font-size: 0.68rem;
+    }
+
+    .auction-card {
+        width: min(100%, 400px);
+        max-width: 400px;
+        padding: 0.9rem;
+    }
+
+    .auction-log {
+        max-height: 100px;
+        font-size: 0.75rem;
+    }
+
+    .teams-container {
+        width: 100%;
+        gap: 0.8rem;
+    }
+
+    .team-panel {
+        width: 100%;
+        max-width: 520px;
+    }
+
+    .battle-arena {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: start;
+        gap: 0.65rem;
+    }
+
+    .battle-center {
+        grid-column: 1 / -1;
+        grid-row: 2;
+        order: initial;
+        width: 100%;
+    }
+
+    .fighter {
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+    }
+
+    .fighter-card {
+        padding: 0.8rem 0.35rem;
+    }
+
+    .fighter-name {
+        font-size: clamp(0.75rem, 3.2vw, 1rem);
+        overflow-wrap: anywhere;
+    }
+
+    .fighter-stats-mini {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.3rem;
+    }
+
+    .power-compare-grid {
+        gap: 0.4rem;
+    }
+
+    .power-compare-col {
+        min-width: 0;
+        padding: 0.6rem;
+    }
+
+    .victory-content {
+        width: 100%;
+        padding-top: 1rem;
+    }
+
+    .victory-title {
+        font-size: clamp(1.6rem, 8vw, 2.5rem);
+        overflow-wrap: anywhere;
+    }
+
+    .home-button {
+        top: max(0.6rem, env(safe-area-inset-top));
+        left: max(0.6rem, env(safe-area-inset-left));
+        min-height: 40px;
+        padding: 0 0.75rem;
+        font-size: 0.65rem;
+    }
+
+    .sound-toggle {
+        top: max(0.6rem, env(safe-area-inset-top));
+        right: max(0.6rem, env(safe-area-inset-right));
+        width: 40px;
+        height: 40px;
+    }
+}
+
+@media (max-width: 380px) {
+    .screen { padding-inline: 0.7rem; }
+    .lobby-container { gap: 0.35rem; }
+    .player-setup { padding: 0.65rem 0.45rem; }
+    .player-setup .input-field { font-size: 0.78rem; }
+    .auction-header { padding-inline: 0.25rem; }
+    .bid-column { padding: 0.4rem; }
+    .home-confirm-actions > .btn { flex: 1 1 100%; }
 }

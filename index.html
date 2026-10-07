@@ -14,10 +14,23 @@
 <body>
     <canvas id="particle-canvas"></canvas>
 
+    <button id="btn-home-global" class="home-button" type="button" aria-haspopup="dialog">
+        <span aria-hidden="true">⌂</span> HOME
+    </button>
+
     <!-- Sound Toggle -->
     <button id="sound-toggle" class="sound-toggle" title="Toggle Sound">
         🔊
     </button>
+
+    <dialog id="home-confirm-dialog" class="home-confirm-dialog" aria-labelledby="home-confirm-title">
+        <h2 id="home-confirm-title">Leave this game?</h2>
+        <p>Are you sure you want to exit? Return to the home main menu?</p>
+        <div class="home-confirm-actions">
+            <button id="btn-home-cancel" class="btn btn-secondary" type="button">CANCEL</button>
+            <button id="btn-home-confirm" class="btn btn-primary" type="button">YES, GO HOME</button>
+        </div>
+    </dialog>
 
     <!-- ======================== SCREEN: TITLE ======================== -->
     <section id="screen-title" class="screen active">
@@ -33,7 +46,6 @@
                 <span class="btn-text">ENTER THE ARENA</span>
                 <span class="btn-shine"></span>
             </button>
-            <p class="version-tag">v1.0 MVP — 2 Player Local</p>
         </div>
     </section>
 
@@ -432,9 +444,6 @@
             <button id="btn-play-again" class="btn btn-primary btn-glow">
                 <span class="btn-text">PLAY AGAIN</span>
                 <span class="btn-shine"></span>
-            </button>
-            <button id="btn-home" class="btn btn-secondary">
-                <span class="btn-text">HOME · CHOOSE MODE</span>
             </button>
         </div>
         <canvas id="confetti-canvas"></canvas>

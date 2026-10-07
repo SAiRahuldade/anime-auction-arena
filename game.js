@@ -615,8 +615,25 @@ if (socket) {
             $("online-room-status").textContent = `Room ${state.roomCode} created. Share this code and wait for your friend.`;
         }
 
-        if (state.started && state.auction && state.auction.currentChar) {
+        if (state.started) {
+            $("online-room-status").textContent = `Room ${state.roomCode} is live. Opening the auction...`;
+            if (GameState.currentScreen !== "screen-auction") {
+                showScreen("screen-auction");
+            }
+        }
+
+        if (state.started && state.auction) {
             const char = state.auction.currentChar;
+            if (char) {
+                $("card-tier").textContent = char.tier;
+                $("card-name").textContent = char.name;
+                $("card-series").textContent = char.series;
+                $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+                $("card-base-price").textContent = char.baseCost;
+                $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+            } else {
+                $("card-name").textContent = "Preparing next character...";
+            }
             const p1 = state.players[0];
             const p2 = state.players[1];
 
@@ -630,21 +647,11 @@ if (socket) {
             $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0}/${GameState.maxCards} cards`;
             $("auction-round").textContent = `${state.auction.currentIndex + 1} / ${state.auction.poolSize}`;
             $("timer-text").textContent = state.auction.timeLeft;
-            $("card-tier").textContent = char.tier;
-            $("card-name").textContent = char.name;
-            $("card-series").textContent = char.series;
-            $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
-            $("card-base-price").textContent = char.baseCost;
-            $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
 
             $("pbs-p1-amount").textContent = `$${state.auction.playerBids[0] || 0}`;
             $("pbs-p2-amount").textContent = `$${state.auction.playerBids[1] || 0}`;
             $("pbs-p1-state").textContent = state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
             $("pbs-p2-state").textContent = state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
-
-            if (GameState.currentScreen !== "screen-auction") {
-                showScreen("screen-auction");
-            }
         }
     });
 
@@ -753,8 +760,13 @@ $("btn-join-room").addEventListener("click", () => {
 
 $("btn-start-auction").addEventListener("click", () => {
     if (GameState.currentMode === "online") {
-        const roomCode = $("room-code-input").value.trim();
-        startOnlineRoomFlow(roomCode ? "join" : "create");
+        if (GameState.online.state?.started) {
+            showScreen("screen-auction");
+        } else if (GameState.online.roomCode) {
+            $("online-room-status").textContent = "Waiting for your friend to join. The auction starts automatically when both players are connected.";
+        } else {
+            $("online-room-status").textContent = "Create a room or join your friend's room before starting.";
+        }
         return;
     }
 
@@ -1901,10 +1913,40 @@ $("btn-play-again").addEventListener("click", () => {
     showScreen("screen-lobby");
 });
 
-$("btn-home").addEventListener("click", () => {
-    resetGameState();
-    localStorage.removeItem("aaa_save");
-    showScreen("screen-mode-select");
+const homeDialog = $("home-confirm-dialog");
+
+$("btn-home-global").addEventListener("click", () => {
+    homeDialog.showModal();
+});
+
+$("btn-home-cancel").addEventListener("click", () => {
+    homeDialog.close();
+});
+
+$("btn-home-confirm").addEventListener("click", () => {
+    homeDialog.close();
+    let hasReturnedHome = false;
+    const returnHome = () => {
+        if (hasReturnedHome) return;
+        hasReturnedHome = true;
+        if (socket?.connected) socket.disconnect();
+        localStorage.removeItem(ONLINE_ROOM_CODE_KEY);
+        localStorage.removeItem("aaa_save");
+        resetGameState();
+        stopCharacterTheme();
+        if (GameState.soundEnabled) playBackgroundMusic();
+        showScreen("screen-mode-select");
+    };
+
+    if (GameState.currentMode === "online" && socket?.connected && GameState.online.roomCode) {
+        socket.timeout(3000).emit("online:leaveRoom", {
+            roomCode: GameState.online.roomCode,
+            playerId: onlinePlayerId,
+        }, returnHome);
+        setTimeout(returnHome, 3000);
+    } else {
+        returnHome();
+    }
 });
 
 // ==================== SAVE / LOAD (localStorage) ====================
