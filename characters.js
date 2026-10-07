@@ -1000,3 +1000,7 @@ const MARKET_EVENTS = [
         timerModifier: 0.5,
     },
 ];
+
+if (typeof module !== "undefined" && module.exports) {
+    module.exports = { CHARACTER_DB };
+}

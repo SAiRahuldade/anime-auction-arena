@@ -4,7 +4,7 @@ const path = require('path');
 const { Server } = require('socket.io');
 const { Pool } = require('pg');
 
-require('./characters.js');
+const { CHARACTER_DB } = require('./characters.js');
 
 const app = express();
 const server = http.createServer(app);
@@ -501,7 +501,7 @@ io.on('connection', (socket) => {
     } catch (error) {
       room.started = false;
       room.auction = null;
-      logRoomStoreError(error);
+      console.error(`Could not start auction in room ${room.code}:`, error);
       acknowledge(ack, { ok: false, message: 'Could not start the auction. Please try again.' });
     }
   });
