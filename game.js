@@ -811,7 +811,11 @@ function updateOnlineAuctionView(state, previousAuction) {
 
             stopCharacterTheme();
             playCharacterTheme(char);
-            if (char.tier === "SSS") sfxXTierReveal();
+            if (char.tier === "SSS") {
+                sfxXTierReveal();
+            } else if (char.tier === "S") {
+                sfxBid();
+            }
         }
     } else {
         $("card-name").textContent = "Preparing next character...";
@@ -1105,6 +1109,8 @@ function presentCharacter() {
 
     if (char.tier === "SSS") {
         sfxXTierReveal();
+    } else if (char.tier === "S") {
+        sfxBid();
     }
 
     // Remove animation class after it plays
