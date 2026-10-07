@@ -430,7 +430,6 @@ io.on('connection', (socket) => {
         return;
       }
       acknowledge(ack, { ok: true, roomCode: room.code });
-      if (room.started && room.players.every(player => player.socketId)) startAuctionTimer(room);
       emitRoomState(room);
       return;
     }
@@ -461,20 +460,49 @@ io.on('connection', (socket) => {
     };
     room.players.push(player);
     try {
-      await persistRoom(room);
       await attachPlayer(room, player, socket);
-      if (room.players.length === 2 && room.players.every(candidate => candidate.socketId)) {
-        await beginAuction(room);
-      }
+      await persistRoom(room);
     } catch (error) {
+      room.players = room.players.filter(candidate => candidate !== player);
       logRoomStoreError(error);
       reject('Could not save the room. Please try again.');
       return;
     }
 
     acknowledge(ack, { ok: true, roomCode: room.code });
-    if (!room.started) {
+    emitRoomState(room);
+  });
+
+  socket.on('online:startAuction', async ({ roomCode } = {}, ack) => {
+    const room = getRoom((roomCode || '').toUpperCase());
+    const playerIndex = room?.players.findIndex(player => player.socketId === socket.id) ?? -1;
+    if (!room) {
+      acknowledge(ack, { ok: false, message: 'Room not found. Please create a new room.' });
+      return;
+    }
+    if (playerIndex !== 0) {
+      acknowledge(ack, { ok: false, message: 'Only the room creator can start the auction.' });
+      return;
+    }
+    if (room.started) {
+      acknowledge(ack, { ok: true, roomCode: room.code });
       emitRoomState(room);
+      return;
+    }
+    if (room.players.length !== 2 || !room.players.every(player => player.socketId)) {
+      acknowledge(ack, { ok: false, message: 'Wait until both players are connected before starting.' });
+      emitRoomState(room);
+      return;
+    }
+
+    try {
+      await beginAuction(room);
+      acknowledge(ack, { ok: true, roomCode: room.code });
+    } catch (error) {
+      room.started = false;
+      room.auction = null;
+      logRoomStoreError(error);
+      acknowledge(ack, { ok: false, message: 'Could not start the auction. Please try again.' });
     }
   });
 

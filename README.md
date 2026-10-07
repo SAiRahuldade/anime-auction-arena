@@ -33,6 +33,7 @@ Create a Supabase Postgres project, copy its Postgres connection string (use the
 
 - One player creates a room.
 - The second player joins using the room code.
+- Once both players are connected, the room creator starts the auction; both players enter bidding together.
 - The auction room syncs live through Socket.IO. If a player briefly disconnects, their seat is reserved for five minutes while they reconnect.
 
 ## Background music

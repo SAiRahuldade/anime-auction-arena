@@ -63,6 +63,7 @@ let activeCharacterTheme = null;
 let backgroundMusic = null;
 let pendingRoomAction = null;
 let roomRequestPending = false;
+let startAuctionPending = false;
 
 function getOnlinePlayerId() {
     let playerId = sessionStorage.getItem(ONLINE_PLAYER_ID_KEY);
@@ -133,8 +134,38 @@ function prepareLobbyForMode(mode) {
     if (onlinePanel) {
         onlinePanel.classList.toggle("hidden", mode !== "online");
     }
+    updateOnlineLobbyControls();
 
     showScreen("screen-lobby");
+}
+
+function updateOnlineLobbyControls(state = GameState.online.state) {
+    const startButton = $("btn-start-auction");
+    const createButton = $("btn-create-room");
+    const joinButton = $("btn-join-room");
+    const roomCodeInput = $("room-code-input");
+
+    if (GameState.currentMode !== "online") {
+        startButton.style.display = "";
+        createButton.style.display = "";
+        joinButton.style.display = "";
+        roomCodeInput.readOnly = false;
+        return;
+    }
+
+    const inRoom = !!GameState.online.roomCode;
+    const allPlayersConnected = state?.players?.length === 2 &&
+        state.players.every(player => player.isConnected);
+    const isCreator = state?.myPlayerIndex === 0;
+
+    createButton.style.display = inRoom ? "none" : "";
+    joinButton.style.display = inRoom ? "none" : "";
+    roomCodeInput.readOnly = inRoom;
+    const canStart = !state?.started && allPlayersConnected && isCreator;
+    startButton.style.display = canStart
+        ? "inline-flex"
+        : "none";
+    startButton.querySelector(".btn-text").textContent = "START AUCTION →";
 }
 
 function stopCharacterTheme() {
@@ -596,6 +627,7 @@ if (socket) {
         GameState.online.state = state;
         localStorage.setItem(ONLINE_ROOM_CODE_KEY, state.roomCode || "");
         $("room-code-input").value = state.roomCode || $("room-code-input").value;
+        updateOnlineLobbyControls(state);
 
         if (state.started) {
             stopBackgroundMusic();
@@ -603,16 +635,24 @@ if (socket) {
             playBackgroundMusic();
         }
 
-        if (state.started && state.players?.length >= 2 && state.players.every(player => player.isConnected)) {
+        const allPlayersConnected = state.players?.length === 2 &&
+            state.players.every(player => player.isConnected);
+        if (state.started && allPlayersConnected) {
             GameState.players[0].name = state.players[0]?.name || GameState.players[0].name;
             GameState.players[1].name = state.players[1]?.name || GameState.players[1].name;
             $("p1-name").value = GameState.players[0].name;
             $("p2-name").value = GameState.players[1].name;
-            $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
+            $("online-room-status").textContent = `Room ${state.roomCode} is live. Opening the auction...`;
+        } else if (allPlayersConnected && state.myPlayerIndex === 0) {
+            $("online-room-status").textContent = `Your friend joined room ${state.roomCode}. Start the auction when you're ready.`;
+        } else if (allPlayersConnected) {
+            $("online-room-status").textContent = "Connected. Waiting for the room creator to start the auction.";
         } else if (state.players?.some(player => !player.isConnected)) {
             $("online-room-status").textContent = `Room ${state.roomCode}: a player disconnected. Waiting for them to reconnect...`;
         } else {
-            $("online-room-status").textContent = `Room ${state.roomCode} created. Share this code and wait for your friend.`;
+            $("online-room-status").textContent = state.myPlayerIndex === 0
+                ? `Room ${state.roomCode} created. Share this code and wait for your friend.`
+                : `Joined room ${state.roomCode}. Waiting for the room creator.`;
         }
 
         if (state.started) {
@@ -760,12 +800,10 @@ $("btn-join-room").addEventListener("click", () => {
 
 $("btn-start-auction").addEventListener("click", () => {
     if (GameState.currentMode === "online") {
-        if (GameState.online.state?.started) {
-            showScreen("screen-auction");
-        } else if (GameState.online.roomCode) {
-            $("online-room-status").textContent = "Waiting for your friend to join. The auction starts automatically when both players are connected.";
+        if (!GameState.online.roomCode || !socket?.connected) {
+            $("online-room-status").textContent = "Connect to a room with both players before starting the auction.";
         } else {
-            $("online-room-status").textContent = "Create a room or join your friend's room before starting.";
+            startOnlineAuction();
         }
         return;
     }
@@ -777,6 +815,31 @@ $("btn-start-auction").addEventListener("click", () => {
     sfxBid();
     startAuction();
 });
+
+function startOnlineAuction() {
+    if (startAuctionPending || !socket?.connected) return;
+    const state = GameState.online.state;
+    if (state?.myPlayerIndex !== 0 || state.players?.length !== 2 ||
+        !state.players.every(player => player.isConnected)) {
+        $("online-room-status").textContent = "Wait until both players are connected. Only the room creator can start.";
+        return;
+    }
+
+    startAuctionPending = true;
+    $("btn-start-auction").disabled = true;
+    $("online-room-status").textContent = "Starting the auction for both players...";
+    socket.timeout(15000).emit("online:startAuction", {
+        roomCode: GameState.online.roomCode,
+    }, (error, response) => {
+        startAuctionPending = false;
+        $("btn-start-auction").disabled = false;
+        if (error) {
+            $("online-room-status").textContent = "The server did not respond. Check your connection and try again.";
+        } else if (!response?.ok) {
+            $("online-room-status").textContent = response?.message || "The auction could not start. Please try again.";
+        }
+    });
+}
 
 // ==================== AUCTION ENGINE ====================
 function startAuction() {
@@ -1929,6 +1992,11 @@ $("btn-home-confirm").addEventListener("click", () => {
     const returnHome = () => {
         if (hasReturnedHome) return;
         hasReturnedHome = true;
+        GameState.currentMode = "friend";
+        GameState.online.roomCode = "";
+        GameState.online.myPlayerIndex = null;
+        GameState.online.state = null;
+        GameState.online.connected = false;
         if (socket?.connected) socket.disconnect();
         localStorage.removeItem(ONLINE_ROOM_CODE_KEY);
         localStorage.removeItem("aaa_save");
