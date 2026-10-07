@@ -34,6 +34,8 @@ const GameState = {
         matchIndex: 0,
         matches: [],
         currentFighters: null,
+        rosters: [[], []],
+        nextFighter: [1, 1],
         turnCount: 0,
         battleOver: false,
     },
@@ -377,6 +379,8 @@ function resetGameState() {
         matchIndex: 0,
         matches: [],
         currentFighters: null,
+        rosters: [[], []],
+        nextFighter: [1, 1],
         turnCount: 0,
         battleOver: false,
     };
@@ -1697,39 +1701,41 @@ $("btn-start-battle").addEventListener("click", () => {
 });
 
 function showBracket() {
-    // Create match-ups first
-    const matches = [];
-    const count = Math.min(GameState.players[0].team.length, GameState.players[1].team.length);
-    for (let i = 0; i < count; i++) {
-        matches.push({
-            left: { ...GameState.players[0].team[i], currentHp: GameState.players[0].team[i].hp, owner: 0 },
-            right: { ...GameState.players[1].team[i], currentHp: GameState.players[1].team[i].hp, owner: 1 },
-        });
-    }
-    GameState.battle.matches = matches;
+    GameState.battle.rosters = GameState.players.map((player, owner) =>
+        player.team.map(char => ({
+            ...char,
+            currentHp: char.hp,
+            owner,
+            hasUsedUltimate: false,
+        }))
+    );
+    GameState.battle.nextFighter = [1, 1];
+    const [p1Roster, p2Roster] = GameState.battle.rosters;
+    GameState.battle.matches = p1Roster.length && p2Roster.length
+        ? [{ left: p1Roster[0], right: p2Roster[0] }]
+        : [];
 
-    // Render bracket
     const container = $("bracket-container");
-    container.innerHTML = matches.map((m, i) => `
-        <div class="bracket-match" style="animation-delay: ${i * 0.2}s">
-            <div class="bracket-round-label">MATCH ${i + 1}</div>
+    container.innerHTML = `
+        <div class="bracket-match">
+            <div class="bracket-round-label">TEAM GAUNTLET — WINNERS KEEP THEIR REMAINING HP</div>
             <div class="bracket-fighters">
-                <div class="bracket-fighter bracket-p1">
-                    ${characterAvatarHTML(m.left, "char-avatar-sm bf-avatar")}
-                    <span class="bf-name">${m.left.name}</span>
-                    <span class="bf-owner">${GameState.players[0].name}</span>
-                    <span class="bf-power">PL: ${formatPowerLevel(getCharacterPowerLevel(m.left))}</span>
-                </div>
-                <div class="bracket-vs">⚔️</div>
-                <div class="bracket-fighter bracket-p2">
-                    ${characterAvatarHTML(m.right, "char-avatar-sm bf-avatar")}
-                    <span class="bf-name">${m.right.name}</span>
-                    <span class="bf-owner">${GameState.players[1].name}</span>
-                    <span class="bf-power">PL: ${formatPowerLevel(getCharacterPowerLevel(m.right))}</span>
-                </div>
+                ${[p1Roster, p2Roster].map((roster, owner) => `
+                    <div class="bracket-fighter ${owner === 0 ? "bracket-p1" : "bracket-p2"}">
+                        <span class="bf-owner">${GameState.players[owner].name}'s lineup</span>
+                        ${roster.length ? roster.map(char => `
+                            <div class="bf-lineup-entry">
+                                ${characterAvatarHTML(char, "char-avatar-sm bf-avatar")}
+                                <span class="bf-name">${char.name}</span>
+                                <span class="bf-power">PL: ${formatPowerLevel(getCharacterPowerLevel(char))}</span>
+                            </div>
+                        `).join("") : `<span class="bf-name">No fighters</span>`}
+                    </div>
+                `).join('<div class="bracket-vs">VS</div>')}
             </div>
+            <p class="bracket-round-label">Every fighter opens with their ultimate. Surviving fighters carry HP into the next fight.</p>
         </div>
-    `).join("");
+    `;
 
     showScreen("screen-bracket");
 }
@@ -1741,9 +1747,10 @@ $("btn-begin-fights").addEventListener("click", () => {
 
 // ==================== BATTLE ENGINE ====================
 function startBattle() {
-    // matches already set by showBracket
     const matches = GameState.battle.matches;
     if (matches.length === 0) {
+        GameState.players[0].score = GameState.battle.rosters[0].length ? 1 : 0;
+        GameState.players[1].score = GameState.battle.rosters[1].length ? 1 : 0;
         showVictoryScreen();
         return;
     }
@@ -1761,12 +1768,7 @@ function setupMatch() {
     GameState.battle.turnCount = 0;
     GameState.battle.battleOver = false;
 
-    // Reset HP
-    match.left.currentHp = match.left.hp;
-    match.right.currentHp = match.right.hp;
-
-    // Update match info
-    $("battle-match-num").textContent = `${GameState.battle.matchIndex + 1} / ${GameState.battle.matches.length}`;
+    $("battle-match-num").textContent = `FIGHT ${GameState.battle.matchIndex + 1}`;
     $("battle-p1-score").textContent = GameState.players[0].score;
     $("battle-p2-score").textContent = GameState.players[1].score;
 
@@ -1799,6 +1801,7 @@ function setupMatch() {
 
     $("btn-next-turn").style.display = "inline-flex";
     $("btn-next-match").style.display = "none";
+    $("btn-next-match").querySelector(".btn-text").textContent = "NEXT FIGHT →";
     
     // Reset fighter positions
     $("fighter-left").classList.remove("fighter-defeated");
@@ -1852,15 +1855,14 @@ function executeTurn() {
         sfxHit();
     }
 
-    // Check if second fighter is KO
-    if (second.currentHp <= 0) {
+    const secondCanCounter = second.currentHp > 0 || !second.hasUsedUltimate;
+    if (!secondCanCounter) {
         second.currentHp = 0;
         updateHP(secondSide, second);
         endMatch(first);
         return;
     }
 
-    // Second attacker strikes back
     setTimeout(() => {
         const result2 = calculateAttack(second, first);
         addBattleLog(result2.log, secondSide);
@@ -1875,30 +1877,39 @@ function executeTurn() {
             sfxHit();
         }
 
-        if (first.currentHp <= 0) {
+        const firstDefeated = first.currentHp <= 0;
+        const secondDefeated = second.currentHp <= 0;
+        if (firstDefeated && secondDefeated) {
+            first.currentHp = 0;
+            second.currentHp = 0;
+            updateHP(firstSide, first);
+            updateHP(secondSide, second);
+            endMatch(null);
+        } else if (firstDefeated) {
             first.currentHp = 0;
             updateHP(firstSide, first);
             endMatch(second);
+        } else if (secondDefeated) {
+            second.currentHp = 0;
+            updateHP(secondSide, second);
+            endMatch(first);
         }
     }, 600);
 }
 
 function calculateAttack(attacker, defender) {
-    let roll;
-    let ultimateRoll;
-    if (GameState.currentMode === "online") {
-        const seedText = `${GameState.online.roomCode}:${GameState.battle.matchIndex}:${GameState.battle.turnCount}:${attacker.id}:${defender.id}`;
+    const seededRoll = (salt, max) => {
+        const seedText = `${GameState.online.roomCode}:${GameState.battle.matchIndex}:${GameState.battle.turnCount}:${attacker.id}:${defender.id}:${salt}`;
         let seed = 2166136261;
         for (let index = 0; index < seedText.length; index++) {
             seed = Math.imul(seed ^ seedText.charCodeAt(index), 16777619);
         }
-        roll = ((seed >>> 0) % 20) + 1;
-        ultimateRoll = ((Math.imul(seed ^ 0x9e3779b9, 16777619) >>> 0) % 100) + 1;
-    } else {
-        roll = d20();
-        ultimateRoll = d100();
-    }
-    const isUltimate = ultimateRoll <= attacker.sp;
+        return ((seed >>> 0) % max) + 1;
+    };
+    const roll = GameState.currentMode === "online" ? seededRoll("attack", 20) : d20();
+    const ultimateRoll = GameState.currentMode === "online" ? seededRoll("ultimate", 100) : d100();
+    const isUltimate = !attacker.hasUsedUltimate || ultimateRoll <= attacker.sp;
+    attacker.hasUsedUltimate = true;
 
     let baseDamage = (attacker.atk + roll) - (defender.def / 2);
     baseDamage = Math.max(1, baseDamage);
@@ -1915,7 +1926,8 @@ function calculateAttack(attacker, defender) {
     }
 
     // Dodge chance based on speed difference
-    if (!isUltimate && d100() <= Math.max(0, (defender.spd - attacker.spd) / 2)) {
+    const dodgeRoll = GameState.currentMode === "online" ? seededRoll("dodge", 100) : d100();
+    if (!isUltimate && dodgeRoll <= Math.max(0, (defender.spd - attacker.spd) / 2)) {
         damage = 0;
         log = `💨 ${defender.name} dodges ${attacker.name}'s attack!`;
     }
@@ -1953,25 +1965,59 @@ function showBattleEffect(text, color) {
 
 function endMatch(winner) {
     GameState.battle.battleOver = true;
-    const winnerPlayerIdx = winner.owner;
-    GameState.players[winnerPlayerIdx].score++;
-
-    addBattleLog(`🏆 ${winner.name} WINS! (+1 for ${GameState.players[winnerPlayerIdx].name})`, "blog-announce");
-
-    // Mark defeated fighter
     const match = GameState.battle.currentFighters;
-    if (match.left.currentHp <= 0) $("fighter-left").classList.add("fighter-defeated");
-    if (match.right.currentHp <= 0) $("fighter-right").classList.add("fighter-defeated");
-
-    $("battle-p1-score").textContent = GameState.players[0].score;
-    $("battle-p2-score").textContent = GameState.players[1].score;
+    const leftDefeated = match.left.currentHp <= 0;
+    const rightDefeated = match.right.currentHp <= 0;
+    if (leftDefeated) $("fighter-left").classList.add("fighter-defeated");
+    if (rightDefeated) $("fighter-right").classList.add("fighter-defeated");
 
     $("btn-next-turn").style.display = "none";
 
-    if (GameState.battle.matchIndex >= GameState.battle.matches.length - 1) {
-        // All matches done
+    if (leftDefeated && rightDefeated) {
+        addBattleLog("💥 DOUBLE K.O.! Both teams send in their next fighter.", "blog-announce");
+        const nextLeft = GameState.battle.rosters[0][GameState.battle.nextFighter[0]];
+        const nextRight = GameState.battle.rosters[1][GameState.battle.nextFighter[1]];
+        if (nextLeft && nextRight) {
+            GameState.battle.nextFighter[0]++;
+            GameState.battle.nextFighter[1]++;
+            GameState.battle.matches.push({
+                left: { ...nextLeft, currentHp: nextLeft.hp, hasUsedUltimate: false },
+                right: { ...nextRight, currentHp: nextRight.hp, hasUsedUltimate: false },
+            });
+            $("btn-next-match").style.display = "inline-flex";
+        } else {
+            if (nextLeft) GameState.players[0].score++;
+            if (nextRight) GameState.players[1].score++;
+            $("battle-p1-score").textContent = GameState.players[0].score;
+            $("battle-p2-score").textContent = GameState.players[1].score;
+            setTimeout(showVictoryScreen, 1500);
+        }
+        return;
+    }
+
+    const winnerPlayerIdx = winner.owner;
+    GameState.players[winnerPlayerIdx].score++;
+    addBattleLog(`🏆 ${winner.name} WINS! (+1 for ${GameState.players[winnerPlayerIdx].name})`, "blog-announce");
+    $("battle-p1-score").textContent = GameState.players[0].score;
+    $("battle-p2-score").textContent = GameState.players[1].score;
+
+    const defeated = leftDefeated ? match.left : match.right;
+    const defeatedOwner = defeated.owner;
+    const nextIndex = GameState.battle.nextFighter[defeatedOwner];
+    const nextFighter = GameState.battle.rosters[defeatedOwner][nextIndex];
+
+    if (!nextFighter) {
         setTimeout(showVictoryScreen, 1500);
     } else {
+        GameState.battle.nextFighter[defeatedOwner] += 1;
+        const replacement = {
+            ...nextFighter,
+            currentHp: nextFighter.hp,
+            hasUsedUltimate: false,
+        };
+        GameState.battle.matches.push(defeatedOwner === 0
+            ? { left: replacement, right: winner }
+            : { left: winner, right: replacement });
         $("btn-next-match").style.display = "inline-flex";
     }
 }
