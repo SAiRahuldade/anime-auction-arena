@@ -256,7 +256,7 @@ function playCharacterTheme(char) {
     const boost = audioCtx.createGain();
     const compressor = audioCtx.createDynamicsCompressor();
     const fade = audioCtx.createGain();
-    boost.gain.value = 20;
+    boost.gain.value = 1000;
     compressor.threshold.value = -3;
     compressor.knee.value = 0;
     compressor.ratio.value = 20;
