@@ -1001,7 +1001,6 @@ body {
 .char-avatar[data-char-id="44"],
 .char-avatar[data-char-id="11"],
 .char-avatar[data-char-id="5"],
-.char-avatar[data-char-id="6"],
 .char-avatar[data-char-id="2"],
 .char-avatar[data-char-id="100"] {
     background-image: url('sss-grid.jpg');
@@ -1013,8 +1012,13 @@ body {
 .char-avatar[data-char-id="11"] { background-position: 66.66% 0%; }
 .char-avatar[data-char-id="5"] { background-position: 100% 0%; }
 .char-avatar[data-char-id="2"] { background-position: 33.33% 100%; }
-.char-avatar[data-char-id="6"] { background-position: 66.66% 100%; }
 .char-avatar[data-char-id="100"] { background-position: 100% 100%; }
+
+.char-avatar[data-char-id="6"] {
+    background-image: url('sss-grid.jpg');
+    background-size: 400% 200%;
+    background-position: 66.66% 100%;
+}
 
 /* X Grid */
 .char-avatar[data-char-id="99"],
