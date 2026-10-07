@@ -547,11 +547,13 @@ function sfxSold() {
 }
 function sfxHit() { playTone(150, 0.15, "sawtooth", 0.12); }
 function sfxBell() {
-    playTone(880, 0.45, "sine", 0.18);
-    setTimeout(() => playTone(660, 0.6, "sine", 0.16), 120);
+    playTone(880, 0.7, "sine", 0.34);
+    playTone(1320, 0.5, "sine", 0.18);
+    setTimeout(() => playTone(660, 0.85, "sine", 0.3), 90);
 }
 
-const BATTLE_MOVE_INTERVAL_MS = 4000;
+const BATTLE_TURN_INTERVAL_MS = 2900;
+const BATTLE_MOVE_INTERVAL_MS = BATTLE_TURN_INTERVAL_MS / 2;
 const BATTLE_INTRO_DURATION_MS = 1800;
 const BATTLE_WINNER_DURATION_MS = 2200;
 function sfxUltimate() {
@@ -1884,14 +1886,10 @@ async function replayBattleRosters(sequenceId) {
             $("power-roster-name").className = `power-roster-name ${playerIndex === 0 ? "name-red" : "name-blue"}`;
             for (const char of player.team) {
                 if (!isBattleSequenceActive(sequenceId)) return;
-                await flashFighter(char, 1000);
+                await flashFighter(char, 500);
             }
             $("power-flash-card").classList.add("hidden");
-            $("power-roster-total-value").textContent = formatPowerLevel(teamTotalPower(player));
-            $("power-roster-total").classList.remove("hidden");
-            await sleep(500);
             $("power-roster-total").classList.add("hidden");
-            $("power-flash-card").classList.remove("hidden");
         }
     } finally {
         skipButton.style.display = previousDisplay;
