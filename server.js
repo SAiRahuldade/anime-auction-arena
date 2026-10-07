@@ -82,6 +82,8 @@ function serializeStoredRoom(room) {
       score,
     })),
     started: room.started,
+    auctionComplete: !!room.auctionComplete,
+    auctionRoundId: room.auctionRoundId || 0,
     auction: room.auction ? {
       pool: room.auction.pool,
       currentIndex: room.auction.currentIndex,
@@ -214,6 +216,7 @@ function serializeRoom(room, socketId) {
     name: player.name,
     budget: player.budget,
     teamCount: player.team.length,
+    team: room.auctionComplete ? player.team : undefined,
     score: player.score,
     isMe: player.socketId === socketId,
     isConnected: !!player.socketId,
@@ -225,6 +228,8 @@ function serializeRoom(room, socketId) {
     players,
     status: room.started ? 'auction' : connectedPlayers >= 2 ? 'ready' : 'waiting',
     started: !!room.started,
+    auctionComplete: !!room.auctionComplete,
+    auctionRoundId: room.auctionRoundId || 0,
     myPlayerIndex: room.players.findIndex(player => player.socketId === socketId),
     auction: room.auction ? {
       currentIndex: room.auction.currentIndex,
@@ -263,8 +268,21 @@ async function resolveAuctionRound(room) {
   room.auction.currentIndex += 1;
   if (room.auction.currentIndex >= room.auction.pool.length) {
     clearInterval(room.auction.timer);
+    if (room.players.some(player => player.team.length > 0)) {
+      room.players.forEach(player => {
+        while (player.team.length < 3) {
+          const available = CHARACTER_DB.filter(character =>
+            !room.players.some(candidate => candidate.team.some(owned => owned.id === character.id))
+          );
+          if (available.length === 0) break;
+          const freeCharacter = available[Math.floor(Math.random() * available.length)];
+          player.team.push({ ...freeCharacter });
+        }
+      });
+    }
     room.started = false;
     room.auction = null;
+    room.auctionComplete = true;
     await persistRoom(room);
     emitRoomState(room);
     return;
@@ -281,6 +299,8 @@ async function resolveAuctionRound(room) {
 
 async function beginAuction(room) {
   room.started = true;
+  room.auctionComplete = false;
+  room.auctionRoundId = (room.auctionRoundId || 0) + 1;
   room.auction = {
     pool: createUniquePool(),
     currentIndex: 0,
@@ -346,6 +366,8 @@ io.on('connection', (socket) => {
       code: roomCode,
       players: [],
       started: false,
+      auctionComplete: false,
+      auctionRoundId: 0,
       auction: null,
     };
 

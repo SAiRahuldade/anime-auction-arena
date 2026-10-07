@@ -172,11 +172,21 @@ function updateOnlineLobbyControls(state = GameState.online.state) {
 function updateOnlineBidControls() {
     const online = GameState.currentMode === "online";
     const playerIndex = GameState.online.myPlayerIndex;
+    const state = GameState.online.state;
     for (const [index, controlsId] of ["p1-bid-controls", "p2-bid-controls"].entries()) {
         const controls = $(controlsId);
         controls.style.display = "";
         controls.querySelectorAll(".btn-bid, .btn-bid-pass").forEach(button => {
-            button.disabled = online && playerIndex !== index;
+            const amount = Number(button.dataset.amount);
+            const player = state?.players?.[index];
+            const cannotAfford = amount > 0 && state?.auction &&
+                state.auction.currentBid + amount > (player?.budget ?? 0);
+            const teamFull = (player?.teamCount ?? 0) >= GameState.maxCards;
+            button.disabled = online && (
+                playerIndex !== index ||
+                !state?.started ||
+                (amount > 0 && (cannotAfford || teamFull))
+            );
             button.setAttribute("aria-label", online && playerIndex !== index
                 ? `${button.textContent.trim()} (opponent controls, read only)`
                 : button.textContent.trim());
@@ -230,7 +240,7 @@ function playCharacterTheme(char) {
     stopCharacterTheme();
 
     const audio = new Audio(encodeURI(themePath));
-    audio.volume = 0.32;
+    audio.volume = 0.82;
     audio.preload = "auto";
     activeCharacterTheme = audio;
     audio.play().catch(() => {
@@ -683,6 +693,21 @@ if (socket) {
             $("online-room-status").textContent = state.myPlayerIndex === 0
                 ? `Room ${state.roomCode} created. Share this code and wait for your friend.`
                 : `Joined room ${state.roomCode}. Waiting for the room creator.`;
+        }
+
+        if (state.auctionComplete) {
+            $("online-room-status").textContent = `Auction complete in room ${state.roomCode}. Revealing both teams...`;
+            if (!previousState?.auctionComplete) {
+                state.players.forEach((player, index) => {
+                    GameState.players[index].name = player.name;
+                    GameState.players[index].budget = player.budget;
+                    GameState.players[index].team = (player.team || []).map(char => ({ ...char }));
+                    GameState.players[index].score = 0;
+                    GameState.players[index].activeSynergies = [];
+                });
+                endAuction();
+            }
+            return;
         }
 
         if (state.started) {
@@ -1407,7 +1432,7 @@ function endAuction() {
 
     if (!anyWon) {
         addAuctionLog("🏁 No bids were placed, so no one receives any characters.", "log-system");
-    } else {
+    } else if (GameState.currentMode !== "online") {
         GameState.players.forEach(player => {
             while (player.team.length < GameState.maxCards) {
                 const remaining = CHARACTER_DB.filter(c =>
@@ -1757,6 +1782,10 @@ $("btn-begin-fights").addEventListener("click", () => {
 function startBattle() {
     // matches already set by showBracket
     const matches = GameState.battle.matches;
+    if (matches.length === 0) {
+        showVictoryScreen();
+        return;
+    }
     GameState.battle.matchIndex = 0;
     GameState.players[0].score = 0;
     GameState.players[1].score = 0;
@@ -1894,8 +1923,21 @@ function executeTurn() {
 }
 
 function calculateAttack(attacker, defender) {
-    const roll = d20();
-    const isUltimate = d100() <= attacker.sp;
+    let roll;
+    let ultimateRoll;
+    if (GameState.currentMode === "online") {
+        const seedText = `${GameState.online.roomCode}:${GameState.battle.matchIndex}:${GameState.battle.turnCount}:${attacker.id}:${defender.id}`;
+        let seed = 2166136261;
+        for (let index = 0; index < seedText.length; index++) {
+            seed = Math.imul(seed ^ seedText.charCodeAt(index), 16777619);
+        }
+        roll = ((seed >>> 0) % 20) + 1;
+        ultimateRoll = ((Math.imul(seed ^ 0x9e3779b9, 16777619) >>> 0) % 100) + 1;
+    } else {
+        roll = d20();
+        ultimateRoll = d100();
+    }
+    const isUltimate = ultimateRoll <= attacker.sp;
 
     let baseDamage = (attacker.atk + roll) - (defender.def / 2);
     baseDamage = Math.max(1, baseDamage);
@@ -2073,6 +2115,15 @@ function startConfetti() {
 $("btn-play-again").addEventListener("click", () => {
     resetGameState();
     localStorage.removeItem("aaa_save");
+    if (GameState.currentMode === "online" && socket?.connected && GameState.online.roomCode) {
+        updateOnlineLobbyControls();
+        updateOnlineBidControls();
+        $("online-room-status").textContent = GameState.online.myPlayerIndex === 0
+            ? "Same room, same players. Start the next auction when you're ready."
+            : "Same room, same players. Waiting for the room creator to start again.";
+        showScreen("screen-lobby");
+        return;
+    }
     showScreen("screen-lobby");
 });
 
