@@ -60,6 +60,7 @@ const PLAYER_NAME_KEY = "aaa_player_name";
 const ONLINE_PLAYER_ID_KEY = "aaa_online_player_id";
 const ONLINE_ROOM_CODE_KEY = "aaa_online_room_code";
 let activeCharacterTheme = null;
+let activeCharacterThemeNodes = null;
 let backgroundMusic = null;
 let pendingRoomAction = null;
 let roomRequestPending = false;
@@ -205,9 +206,16 @@ function submitOnlineBid(amount) {
 }
 
 function stopCharacterTheme() {
-    if (!activeCharacterTheme) return;
-    activeCharacterTheme.pause();
-    activeCharacterTheme.currentTime = 0;
+    if (activeCharacterTheme) {
+        activeCharacterTheme.pause();
+        activeCharacterTheme.currentTime = 0;
+    }
+    if (activeCharacterThemeNodes) {
+        activeCharacterThemeNodes.source.disconnect();
+        activeCharacterThemeNodes.gain.disconnect();
+        activeCharacterThemeNodes.compressor.disconnect();
+        activeCharacterThemeNodes = null;
+    }
     activeCharacterTheme = null;
 }
 
@@ -240,11 +248,25 @@ function playCharacterTheme(char) {
     stopCharacterTheme();
 
     const audio = new Audio(encodeURI(themePath));
-    audio.volume = 0.82;
+    audio.volume = 1;
     audio.preload = "auto";
+    ensureAudioReady();
+    const source = audioCtx.createMediaElementSource(audio);
+    const gain = audioCtx.createGain();
+    const compressor = audioCtx.createDynamicsCompressor();
+    gain.gain.value = 50;
+    compressor.threshold.value = -3;
+    compressor.knee.value = 0;
+    compressor.ratio.value = 20;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.2;
+    source.connect(gain);
+    gain.connect(compressor);
+    compressor.connect(audioCtx.destination);
+    activeCharacterThemeNodes = { source, gain, compressor };
     activeCharacterTheme = audio;
     audio.play().catch(() => {
-        activeCharacterTheme = null;
+        stopCharacterTheme();
     });
 }
 
