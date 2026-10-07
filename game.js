@@ -172,8 +172,26 @@ function updateOnlineLobbyControls(state = GameState.online.state) {
 function updateOnlineBidControls() {
     const online = GameState.currentMode === "online";
     const playerIndex = GameState.online.myPlayerIndex;
-    $("p1-bid-controls").style.display = online && playerIndex !== 0 ? "none" : "";
-    $("p2-bid-controls").style.display = online && playerIndex !== 1 ? "none" : "";
+    for (const [index, controlsId] of ["p1-bid-controls", "p2-bid-controls"].entries()) {
+        const controls = $(controlsId);
+        controls.style.display = "";
+        controls.querySelectorAll(".btn-bid, .btn-bid-pass").forEach(button => {
+            button.disabled = online && playerIndex !== index;
+            button.setAttribute("aria-label", online && playerIndex !== index
+                ? `${button.textContent.trim()} (opponent controls, read only)`
+                : button.textContent.trim());
+        });
+    }
+}
+
+function submitOnlineBid(amount) {
+    const roomCode = GameState.online.roomCode;
+    const playerIndex = GameState.online.myPlayerIndex;
+    if (!socket?.connected || !roomCode || playerIndex === null) {
+        $("online-room-status").textContent = "Reconnect to the game server before bidding.";
+        return;
+    }
+    socket.emit("auction:bid", { roomCode, playerIndex, amount });
 }
 
 function stopCharacterTheme() {
@@ -1329,21 +1347,16 @@ function addAuctionLog(message, className = "") {
 // Attach bid listeners
 document.addEventListener("click", (e) => {
     if (e.target.classList.contains("btn-bid") || e.target.classList.contains("btn-bid-pass")) {
-        ensureAudioReady();
         const player = parseInt(e.target.dataset.player) - 1;
         const amount = parseInt(e.target.dataset.amount);
         if (!e.target.disabled) {
             if (GameState.currentMode === "online") {
-                const roomCode = GameState.online.roomCode || $("room-code-input").value.trim().toUpperCase();
-                if (socket && roomCode && GameState.online.myPlayerIndex !== null) {
-                    socket.emit("auction:bid", {
-                        roomCode,
-                        playerIndex: GameState.online.myPlayerIndex,
-                        amount,
-                    });
-                    return;
-                }
+                if (player !== GameState.online.myPlayerIndex) return;
+                ensureAudioReady();
+                submitOnlineBid(amount);
+                return;
             }
+            ensureAudioReady();
             handleBid(player, amount);
         }
     }
@@ -1352,6 +1365,24 @@ document.addEventListener("click", (e) => {
 // Keyboard shortcuts for bidding
 document.addEventListener("keydown", (e) => {
     if (GameState.currentScreen !== "screen-auction") return;
+
+    if (GameState.currentMode === "online") {
+        const key = e.key.toLowerCase();
+        const playerIndex = GameState.online.myPlayerIndex;
+        const shortcuts = playerIndex === 0
+            ? { q: 1, w: 2, e: 5, r: 0 }
+            : playerIndex === 1
+                ? { u: 1, i: 2, o: 5, p: 0 }
+                : {};
+        if ("qweruiop".includes(key)) {
+            e.preventDefault();
+            if (Object.prototype.hasOwnProperty.call(shortcuts, key)) {
+                ensureAudioReady();
+                submitOnlineBid(shortcuts[key]);
+            }
+        }
+        return;
+    }
 
     // Player 1: Q/W/E = +1/+2/+5, R = Pass
     if (e.key === "q" || e.key === "Q") handleBid(0, 1);
