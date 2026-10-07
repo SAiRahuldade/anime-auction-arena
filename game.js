@@ -57,6 +57,7 @@ const ONLINE_PLAYER_ID_KEY = "aaa_online_player_id";
 const ONLINE_ROOM_CODE_KEY = "aaa_online_room_code";
 let activeCharacterTheme = null;
 let activeCharacterThemeNodes = null;
+let activeCharacterThemeFadeTimer = null;
 let backgroundMusic = null;
 let pendingRoomAction = null;
 let roomRequestPending = false;
@@ -201,14 +202,19 @@ function submitOnlineBid(amount) {
 }
 
 function stopCharacterTheme() {
+    if (activeCharacterThemeFadeTimer) {
+        clearTimeout(activeCharacterThemeFadeTimer);
+        activeCharacterThemeFadeTimer = null;
+    }
     if (activeCharacterTheme) {
         activeCharacterTheme.pause();
         activeCharacterTheme.currentTime = 0;
     }
     if (activeCharacterThemeNodes) {
         activeCharacterThemeNodes.source.disconnect();
-        activeCharacterThemeNodes.gain.disconnect();
+        activeCharacterThemeNodes.boost.disconnect();
         activeCharacterThemeNodes.compressor.disconnect();
+        activeCharacterThemeNodes.fade.disconnect();
         activeCharacterThemeNodes = null;
     }
     activeCharacterTheme = null;
@@ -247,22 +253,30 @@ function playCharacterTheme(char) {
     audio.preload = "auto";
     ensureAudioReady();
     const source = audioCtx.createMediaElementSource(audio);
-    const gain = audioCtx.createGain();
+    const boost = audioCtx.createGain();
     const compressor = audioCtx.createDynamicsCompressor();
-    gain.gain.value = 50;
+    const fade = audioCtx.createGain();
+    boost.gain.value = 50;
     compressor.threshold.value = -3;
     compressor.knee.value = 0;
     compressor.ratio.value = 20;
     compressor.attack.value = 0.003;
     compressor.release.value = 0.2;
-    source.connect(gain);
-    gain.connect(compressor);
-    compressor.connect(audioCtx.destination);
-    activeCharacterThemeNodes = { source, gain, compressor };
+    const startTime = audioCtx.currentTime;
+    fade.gain.setValueAtTime(1, startTime);
+    fade.gain.setValueAtTime(1, startTime + 3);
+    fade.gain.linearRampToValueAtTime(0, startTime + 7);
+    source.connect(boost);
+    boost.connect(compressor);
+    compressor.connect(fade);
+    fade.connect(audioCtx.destination);
+    activeCharacterThemeNodes = { source, boost, compressor, fade };
     activeCharacterTheme = audio;
+    audio.addEventListener("ended", stopCharacterTheme, { once: true });
     audio.play().catch(() => {
         stopCharacterTheme();
     });
+    activeCharacterThemeFadeTimer = setTimeout(stopCharacterTheme, 7000);
 }
 
 // ==================== UTILITY FUNCTIONS ====================
