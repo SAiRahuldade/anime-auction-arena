@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anime Auction: Arena</title>
+    <meta name="description" content="Bid on legendary anime characters, build your ultimate team, and battle in the arena! A 2-player competitive auction and battle game.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Orbitron:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <canvas id="particle-canvas"></canvas>
+
+    <!-- Sound Toggle -->
+    <button id="sound-toggle" class="sound-toggle" title="Toggle Sound">
+        🔊
+    </button>
+
+    <!-- ======================== SCREEN: TITLE ======================== -->
+    <section id="screen-title" class="screen active">
+        <div class="title-content">
+            <div class="title-glow-ring"></div>
+            <h1 class="game-title">
+                <span class="title-line title-anime">ANIME</span>
+                <span class="title-line title-auction">AUCTION</span>
+                <span class="title-line title-arena">: ARENA</span>
+            </h1>
+            <p class="tagline">Bid. Build. Battle.</p>
+            <button id="btn-start" class="btn btn-primary btn-glow pulse-animate">
+                <span class="btn-text">ENTER THE ARENA</span>
+                <span class="btn-shine"></span>
+            </button>
+            <p class="version-tag">v1.0 MVP — 2 Player Local</p>
+        </div>
+    </section>
+
+    <!-- ======================== SCREEN: PLAYER NAME ======================== -->
+    <section id="screen-name-entry" class="screen">
+        <div class="screen-header">
+            <h2 class="screen-title-text">👤 PLAYER PROFILE</h2>
+            <p class="screen-subtitle">Enter your name first, then choose how you want to play</p>
+        </div>
+        <div class="name-entry-card">
+            <label for="player-name">Your name</label>
+            <input type="text" id="player-name" class="input-field" placeholder="Enter your name..." maxlength="16" value="Player">
+            <button id="btn-save-player-name" class="btn btn-primary btn-glow">
+                <span class="btn-text">CONTINUE</span>
+                <span class="btn-shine"></span>
+            </button>
+        </div>
+    </section>
+
+    <!-- ======================== SCREEN: MODE SELECT ======================== -->
+    <section id="screen-mode-select" class="screen">
+        <div class="screen-header">
+            <h2 class="screen-title-text">🎮 CHOOSE MODE</h2>
+            <p class="screen-subtitle">Pick your battle format</p>
+        </div>
+        <div class="mode-select-grid">
+            <button class="mode-btn" data-mode="ai">
+                <span class="mode-icon">🤖</span>
+                <span class="mode-title">Play vs AI</span>
+                <span class="mode-sub">Battle against a CPU rival</span>
+            </button>
+            <button class="mode-btn" data-mode="online">
+                <span class="mode-icon">🌐</span>
+                <span class="mode-title">Online</span>
+                <span class="mode-sub">Match with another player online</span>
+            </button>
+            <button class="mode-btn" data-mode="friend">
+                <span class="mode-icon">👥</span>
+                <span class="mode-title">Vs Friend</span>
+                <span class="mode-sub">Play locally with a friend</span>
+            </button>
+        </div>
+    </section>
+
+    <!-- ======================== SCREEN: LOBBY ======================== -->
+    <section id="screen-lobby" class="screen">
+        <div class="screen-header">
+            <h2 class="screen-title-text">⚔️ PLAYER LOBBY</h2>
+            <p class="screen-subtitle">Enter your names to begin the auction</p>
+        </div>
+        <div class="lobby-container">
+            <div class="player-setup player-1-setup">
+                <div class="player-avatar-ring p1-ring">
+                    <div class="avatar-icon">P1</div>
+                </div>
+                <label for="p1-name">Player 1</label>
+                <input type="text" id="p1-name" class="input-field" placeholder="Enter name..." maxlength="12" value="Player 1">
+                <div class="budget-display">
+                    <span class="budget-label">Budget</span>
+                    <span class="budget-amount">$30</span>
+                </div>
+            </div>
+            <div class="vs-divider">
+                <span>VS</span>
+            </div>
+            <div class="player-setup player-2-setup">
+                <div class="player-avatar-ring p2-ring">
+                    <div class="avatar-icon">P2</div>
+                </div>
+                <label for="p2-name">Player 2</label>
+                <input type="text" id="p2-name" class="input-field" placeholder="Enter name..." maxlength="12" value="Player 2">
+                <div class="budget-display">
+                    <span class="budget-label">Budget</span>
+                    <span class="budget-amount">$30</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="online-room-panel" class="online-room-panel hidden">
+            <label for="room-code-input">Room Code</label>
+            <div class="online-room-actions">
+                <input type="text" id="room-code-input" class="input-field" placeholder="Enter room code" maxlength="5">
+                <button id="btn-create-room" class="btn btn-secondary">Create Room</button>
+                <button id="btn-join-room" class="btn btn-primary">Join Room</button>
+            </div>
+            <p id="online-room-status" class="online-room-status">Create a room or join one to play online.</p>
+        </div>
+
+        <button id="btn-start-auction" class="btn btn-primary btn-glow">
+            <span class="btn-text">START AUCTION →</span>
+            <span class="btn-shine"></span>
+        </button>
+    </section>
+
+    <!-- ======================== SCREEN: AUCTION ======================== -->
+    <section id="screen-auction" class="screen">
+        <div class="auction-header">
+            <div class="auction-player-info p1-info">
+                <span class="ap-name" id="auction-p1-name">Player 1</span>
+                <span class="ap-budget" id="auction-p1-budget">$30</span>
+                <span class="ap-cards" id="auction-p1-cards">0/3 cards</span>
+            </div>
+            <div class="auction-round-info">
+                <span class="round-label">CHARACTER</span>
+                <span class="round-number" id="auction-round">1 / 10</span>
+            </div>
+            <div class="auction-player-info p2-info">
+                <span class="ap-name" id="auction-p2-name">Player 2</span>
+                <span class="ap-budget" id="auction-p2-budget">$30</span>
+                <span class="ap-cards" id="auction-p2-cards">0/3 cards</span>
+            </div>
+        </div>
+
+        <div class="auction-stage">
+            <!-- Left Bidding Column -->
+            <div class="bid-column left-bid-column">
+                <div class="bid-player-controls p1-controls" id="p1-bid-controls">
+                    <span class="bid-player-label" id="bid-p1-label">Player 1</span>
+                    <div class="player-bid-status p1-bid-status" id="p1-bid-status">
+                        <span class="pbs-name" id="pbs-p1-name">Player 1</span>
+                        <span class="pbs-label">CURRENT BID</span>
+                        <span class="pbs-amount" id="pbs-p1-amount">$0</span>
+                        <span class="pbs-state" id="pbs-p1-state">No bid</span>
+                    </div>
+                    <div class="bid-buttons">
+                        <button class="btn btn-bid p1-btn" data-player="1" data-amount="1">+$1</button>
+                        <button class="btn btn-bid p1-btn" data-player="1" data-amount="2">+$2</button>
+                        <button class="btn btn-bid p1-btn" data-player="1" data-amount="5">+$5</button>
+                        <button class="btn btn-bid-pass p1-btn" data-player="1" data-amount="0">PASS</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Card & Timer Column -->
+            <div class="center-stage-column">
+                <div class="bid-timer-container">
+                    <svg class="timer-ring" viewBox="0 0 100 100">
+                        <circle class="timer-bg" cx="50" cy="50" r="45"/>
+                        <circle class="timer-progress" id="timer-progress" cx="50" cy="50" r="45"/>
+                    </svg>
+                    <span class="timer-text" id="timer-text">10</span>
+                </div>
+
+                <div class="auction-card-container">
+                    <div class="auction-card" id="auction-card">
+                        <div class="card-tier" id="card-tier">S</div>
+                        <div class="card-avatar" id="card-avatar">🔥</div>
+                        <div class="card-name" id="card-name">Character Name</div>
+                        <div class="card-series" id="card-series">Series</div>
+                        <div class="card-stats card-stats-power">
+                            <div class="stat stat-power-wide"><span class="stat-label">Power Level</span><span class="stat-value" id="card-power">0</span></div>
+                        </div>
+                        <div class="card-tags" id="card-tags"></div>
+                        <div class="card-base-price">Base: $<span id="card-base-price">0</span></div>
+                        <div class="card-result-overlay hidden" id="card-result-overlay">
+                            <div class="card-result-text" id="card-result-text"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Bidding Column -->
+            <div class="bid-column right-bid-column">
+                <div class="bid-player-controls p2-controls" id="p2-bid-controls">
+                    <span class="bid-player-label" id="bid-p2-label">Player 2</span>
+                    <div class="player-bid-status p2-bid-status" id="p2-bid-status">
+                        <span class="pbs-name" id="pbs-p2-name">Player 2</span>
+                        <span class="pbs-label">CURRENT BID</span>
+                        <span class="pbs-amount" id="pbs-p2-amount">$0</span>
+                        <span class="pbs-state" id="pbs-p2-state">No bid</span>
+                    </div>
+                    <div class="bid-buttons">
+                        <button class="btn btn-bid p2-btn" data-player="2" data-amount="1">+$1</button>
+                        <button class="btn btn-bid p2-btn" data-player="2" data-amount="2">+$2</button>
+                        <button class="btn btn-bid p2-btn" data-player="2" data-amount="5">+$5</button>
+                        <button class="btn btn-bid-pass p2-btn" data-player="2" data-amount="0">PASS</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Market Event Popup -->
+        <div class="market-event-popup" id="market-event-popup">
+            <div class="event-icon">⚡</div>
+            <div class="event-title" id="event-title">MARKET CRASH!</div>
+            <div class="event-desc" id="event-desc">Everyone loses half their remaining budget!</div>
+        </div>
+
+        <!-- Auction log -->
+        <div class="auction-log" id="auction-log">
+            <div class="log-entry">Welcome to the Auction! Let the bidding begin...</div>
+        </div>
+    </section>
+
+    <!-- ======================== SCREEN: POWER REVEAL ======================== -->
+    <section id="screen-power-reveal" class="screen">
+        <div class="power-reveal-wrap">
+            <div class="power-reveal-phase" id="power-phase-intro">
+                <h2 class="power-reveal-title">⚡ AUCTION COMPLETE ⚡</h2>
+                <p class="power-reveal-sub">Calculating team power levels...</p>
+            </div>
+
+            <div class="power-reveal-phase hidden" id="power-phase-roster">
+                <h2 class="power-roster-name" id="power-roster-name">Player 1</h2>
+                <p class="power-roster-label">FIGHTERS</p>
+                <div class="power-flash-card" id="power-flash-card">
+                    <div class="power-flash-avatar char-avatar char-avatar-lg" id="power-flash-avatar"></div>
+                    <div class="power-flash-name" id="power-flash-name">Character</div>
+                    <div class="power-flash-value" id="power-flash-value">0</div>
+                    <div class="power-flash-pl-label">POWER LEVEL</div>
+                </div>
+                <div class="power-roster-total hidden" id="power-roster-total">
+                    <span class="power-total-label">TEAM TOTAL</span>
+                    <span class="power-total-value" id="power-roster-total-value">0</span>
+                </div>
+            </div>
+
+            <div class="power-reveal-phase hidden" id="power-phase-compare">
+                <h2 class="power-reveal-title">⚔️ SIDE BY SIDE ⚔️</h2>
+                <div class="power-compare-grid">
+                    <div class="power-compare-col power-col-red">
+                        <h3 id="power-compare-p1-name">Player 1</h3>
+                        <div class="power-compare-list" id="power-compare-p1-list"></div>
+                        <div class="power-compare-sum" id="power-compare-p1-sum">0</div>
+                    </div>
+                    <div class="power-compare-vs">VS</div>
+                    <div class="power-compare-col power-col-blue">
+                        <h3 id="power-compare-p2-name">Player 2</h3>
+                        <div class="power-compare-list" id="power-compare-p2-list"></div>
+                        <div class="power-compare-sum" id="power-compare-p2-sum">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="power-reveal-phase hidden" id="power-phase-charts">
+                <h2 class="power-reveal-title">📊 POWER COMPARISON</h2>
+                <div class="power-chart-legend">
+                    <span class="legend-red" id="power-chart-p1-label">Player 1</span>
+                    <span class="legend-blue" id="power-chart-p2-label">Player 2</span>
+                </div>
+                <div class="power-charts-body" id="power-charts-body"></div>
+                <div class="power-total-bars">
+                    <div class="power-total-bar-row">
+                        <span class="ptb-name" id="ptb-p1-name">P1</span>
+                        <div class="ptb-track">
+                            <div class="ptb-fill ptb-red" id="ptb-p1-fill"></div>
+                        </div>
+                        <span class="ptb-val" id="ptb-p1-val">0</span>
+                    </div>
+                    <div class="power-total-bar-row">
+                        <span class="ptb-name" id="ptb-p2-name">P2</span>
+                        <div class="ptb-track">
+                            <div class="ptb-fill ptb-blue" id="ptb-p2-fill"></div>
+                        </div>
+                        <span class="ptb-val" id="ptb-p2-val">0</span>
+                    </div>
+                </div>
+                <div class="power-winner-banner hidden" id="power-winner-banner">
+                    <span id="power-winner-text">PLAYER 1 WINS!</span>
+                </div>
+                <button id="btn-power-continue" class="btn btn-primary btn-glow hidden">
+                    <span class="btn-text">CONTINUE →</span>
+                    <span class="btn-shine"></span>
+                </button>
+            </div>
+        </div>
+        <button type="button" id="btn-skip-reveal" class="btn-skip-reveal" title="Skip animation">Skip »</button>
+    </section>
+
+    <!-- ======================== SCREEN: TEAM REVIEW ======================== -->
+    <section id="screen-teams" class="screen">
+        <div class="screen-header">
+            <h2 class="screen-title-text">📋 TEAM REVIEW</h2>
+            <p class="screen-subtitle">Check your synergies before the battle!</p>
+        </div>
+        <div class="teams-container">
+            <div class="team-panel p1-panel" id="team-p1-panel">
+                <h3 class="team-name" id="team-p1-name">Player 1's Team</h3>
+                <div class="team-power">
+                    <span class="power-label">TEAM POWER</span>
+                    <span class="power-value" id="team-p1-power">0</span>
+                </div>
+                <div class="team-cards" id="team-p1-cards"></div>
+                <div class="team-synergies" id="team-p1-synergies"></div>
+            </div>
+            <div class="vs-divider battle-vs">
+                <span>VS</span>
+            </div>
+            <div class="team-panel p2-panel" id="team-p2-panel">
+                <h3 class="team-name" id="team-p2-name">Player 2's Team</h3>
+                <div class="team-power">
+                    <span class="power-label">TEAM POWER</span>
+                    <span class="power-value" id="team-p2-power">0</span>
+                </div>
+                <div class="team-cards" id="team-p2-cards"></div>
+                <div class="team-synergies" id="team-p2-synergies"></div>
+            </div>
+        </div>
+        <button id="btn-start-battle" class="btn btn-primary btn-glow">
+            <span class="btn-text">⚔️ BEGIN TOURNAMENT ⚔️</span>
+            <span class="btn-shine"></span>
+        </button>
+    </section>
+
+    <!-- ======================== SCREEN: BRACKET ======================== -->
+    <section id="screen-bracket" class="screen">
+        <div class="screen-header">
+            <h2 class="screen-title-text">🏟️ TOURNAMENT BRACKET</h2>
+            <p class="screen-subtitle">Here's how the fights will go down!</p>
+        </div>
+        <div class="bracket-container" id="bracket-container">
+            <!-- Generated by JS -->
+        </div>
+        <button id="btn-begin-fights" class="btn btn-primary btn-glow">
+            <span class="btn-text">⚔️ FIGHT! ⚔️</span>
+            <span class="btn-shine"></span>
+        </button>
+    </section>
+
+    <!-- ======================== SCREEN: BATTLE ======================== -->
+    <section id="screen-battle" class="screen">
+        <div class="battle-header">
+            <div class="battle-match-info">
+                <span class="match-label">MATCH</span>
+                <span class="match-number" id="battle-match-num">1 / 3</span>
+            </div>
+            <div class="battle-score">
+                <span class="score p1-score" id="battle-p1-score">0</span>
+                <span class="score-dash">—</span>
+                <span class="score p2-score" id="battle-p2-score">0</span>
+            </div>
+        </div>
+
+        <div class="battle-arena">
+            <div class="fighter fighter-left" id="fighter-left">
+                <div class="fighter-owner" id="fighter-left-owner">Player 1</div>
+                <div class="fighter-card">
+                    <div class="fighter-emoji" id="fighter-left-emoji">🔥</div>
+                    <div class="fighter-name" id="fighter-left-name">Character</div>
+                </div>
+                <div class="health-bar-container">
+                    <div class="health-bar p1-health" id="fighter-left-hp" style="width:100%"></div>
+                    <span class="hp-text" id="fighter-left-hp-text">100 HP</span>
+                </div>
+                <div class="fighter-stats-mini">
+                    <span id="fl-atk">ATK: 0</span>
+                    <span id="fl-def">DEF: 0</span>
+                    <span id="fl-spd">SPD: 0</span>
+                    <span id="fl-sp">SP: 0</span>
+                </div>
+            </div>
+
+            <div class="battle-center">
+                <div class="battle-vs-text">⚔️</div>
+                <div class="battle-log" id="battle-log"></div>
+                <button id="btn-next-turn" class="btn btn-secondary">NEXT TURN →</button>
+                <button id="btn-next-match" class="btn btn-primary btn-glow" style="display:none;">
+                    <span class="btn-text">NEXT MATCH →</span>
+                    <span class="btn-shine"></span>
+                </button>
+            </div>
+
+            <div class="fighter fighter-right" id="fighter-right">
+                <div class="fighter-owner" id="fighter-right-owner">Player 2</div>
+                <div class="fighter-card">
+                    <div class="fighter-emoji" id="fighter-right-emoji">🔥</div>
+                    <div class="fighter-name" id="fighter-right-name">Character</div>
+                </div>
+                <div class="health-bar-container">
+                    <div class="health-bar p2-health" id="fighter-right-hp" style="width:100%"></div>
+                    <span class="hp-text" id="fighter-right-hp-text">100 HP</span>
+                </div>
+                <div class="fighter-stats-mini">
+                    <span id="fr-atk">ATK: 0</span>
+                    <span id="fr-def">DEF: 0</span>
+                    <span id="fr-spd">SPD: 0</span>
+                    <span id="fr-sp">SP: 0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Battle effect overlay -->
+        <div class="battle-effect" id="battle-effect"></div>
+    </section>
+
+    <!-- ======================== SCREEN: VICTORY ======================== -->
+    <section id="screen-victory" class="screen">
+        <div class="victory-content">
+            <div class="trophy-container">
+                <div class="trophy-glow"></div>
+                <div class="trophy-icon">🏆</div>
+            </div>
+            <h2 class="victory-title" id="victory-title">PLAYER 1 WINS!</h2>
+            <p class="victory-subtitle" id="victory-subtitle">Final Score: 3 - 1</p>
+            <div class="victory-stats" id="victory-stats"></div>
+            <button id="btn-play-again" class="btn btn-primary btn-glow">
+                <span class="btn-text">PLAY AGAIN</span>
+                <span class="btn-shine"></span>
+            </button>
+        </div>
+        <canvas id="confetti-canvas"></canvas>
+    </section>
+
+    <!-- Audio -->
+    <div id="sfx-container"></div>
+
+    <script src="characters.js"></script>
+    <script src="game.js"></script>
+</body>
+</html>

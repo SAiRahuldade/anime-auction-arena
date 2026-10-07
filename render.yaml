@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: anime-auction-arena
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production

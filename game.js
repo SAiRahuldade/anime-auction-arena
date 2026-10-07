@@ -1,0 +1,1834 @@
+// ============================================================
+// ANIME AUCTION: ARENA — Game Engine
+// ============================================================
+
+// ==================== GAME STATE ====================
+const socket = io();
+
+const GameState = {
+    currentScreen: "title",
+    currentMode: "friend",
+    online: {
+        roomCode: "",
+        myPlayerIndex: null,
+        connected: false,
+        state: null,
+    },
+    players: [
+        { name: "Player 1", budget: 30, team: [], score: 0 },
+        { name: "Player 2", budget: 30, team: [], score: 0 },
+    ],
+    auction: {
+        pool: [],
+        currentIndex: 0,
+        currentBid: 0,
+        currentBidder: null,
+        playerBids: [0, 0],
+        timer: null,
+        timeLeft: 10,
+        maxTime: 10,
+        passed: [false, false],
+        charBonus: null,
+        priceModifier: 1,
+        timerModifier: 1,
+        resolving: false,
+    },
+    battle: {
+        matchIndex: 0,
+        matches: [],
+        currentFighters: null,
+        turnCount: 0,
+        battleOver: false,
+    },
+    maxCards: 3,
+    totalAuctionRounds: 20,
+    soundEnabled: true,
+    powerRevealSkip: false,
+    aiThinking: false,
+};
+
+const CHARACTER_THEME_MAP = {
+    "Featherine Augustus Aurora": "audio/featherine.mp3",
+    "Anti-Spiral": "audio/anti-spiral.mp3",
+    "Anos Voldigoad": "audio/anos-voldigod.mp3",
+    "Sailor Cosmos": "audio/sailor-cosmos.mp3",
+    "The Truth": "audio/the truth.mp3",
+    "Rimuru Tempest": "audio/rimuru.mp3",
+};
+
+const PLAYER_NAME_KEY = "aaa_player_name";
+let activeCharacterTheme = null;
+
+function fillPlayerSetupFromSavedName() {
+    const savedName = localStorage.getItem(PLAYER_NAME_KEY);
+    const fallbackName = (savedName || "Player").trim() || "Player";
+    const nameInput = $("player-name");
+    if (nameInput) {
+        nameInput.value = fallbackName;
+    }
+    GameState.players[0].name = fallbackName;
+    $("p1-name").value = fallbackName;
+    $("p1-name").placeholder = "Player 1";
+}
+
+function prepareLobbyForMode(mode) {
+    GameState.currentMode = mode;
+    const savedName = (localStorage.getItem(PLAYER_NAME_KEY) || "Player").trim() || "Player";
+    const config = {
+        ai: {
+            rivalName: "Astra AI",
+            editable: false,
+            label: "AI Rival",
+        },
+        online: {
+            rivalName: "Waiting for friend...",
+            editable: false,
+            label: "Online Rival",
+        },
+        friend: {
+            rivalName: "Player 2",
+            editable: true,
+            label: "Player 2",
+        },
+    }[mode] || {
+        rivalName: "Player 2",
+        editable: true,
+        label: "Player 2",
+    };
+
+    const playerOneName = savedName || "Player";
+    GameState.players[0].name = playerOneName;
+    GameState.players[1].name = config.rivalName;
+
+    $("p1-name").value = playerOneName;
+    $("p2-name").value = config.rivalName;
+    $("p2-name").disabled = !config.editable;
+    $("p2-name").placeholder = config.editable ? "Enter rival name..." : "CPU / online rival";
+    $("p2-name").setAttribute("aria-disabled", String(!config.editable));
+
+    const p2Label = $("p2-name").closest(".player-setup")?.querySelector("label");
+    if (p2Label) {
+        p2Label.textContent = config.label;
+    }
+
+    const onlinePanel = $("online-room-panel");
+    if (onlinePanel) {
+        onlinePanel.classList.toggle("hidden", mode !== "online");
+    }
+
+    showScreen("screen-lobby");
+}
+
+function stopCharacterTheme() {
+    if (!activeCharacterTheme) return;
+    activeCharacterTheme.pause();
+    activeCharacterTheme.currentTime = 0;
+    activeCharacterTheme = null;
+}
+
+function playCharacterTheme(char) {
+    if (!GameState.soundEnabled || !char || !char.name || char.tier !== "X") return;
+    const themePath = CHARACTER_THEME_MAP[char.name];
+    if (!themePath) return;
+
+    stopCharacterTheme();
+
+    const audio = new Audio(encodeURI(themePath));
+    audio.volume = 0.32;
+    audio.preload = "auto";
+    activeCharacterTheme = audio;
+    audio.play().catch(() => {
+        activeCharacterTheme = null;
+    });
+}
+
+// ==================== UTILITY FUNCTIONS ====================
+function $(id) { return document.getElementById(id); }
+function qs(sel) { return document.querySelector(sel); }
+function qsa(sel) { return document.querySelectorAll(sel); }
+function rand(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+function d20() { return rand(1, 20); }
+function d100() { return rand(1, 100); }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function teamTotalPower(player) {
+    return player.team.reduce((sum, c) => sum + getCharacterPowerLevel(c), 0);
+}
+
+function formatBudget(amount) {
+    if (typeof formatMoney === "function") return formatMoney(amount);
+    return Number.isInteger(amount) ? `$${amount}` : `$${Number(amount).toFixed(2)}`;
+}
+
+function setCharacterAvatar(el, char, sizeClass = "char-avatar-md") {
+    el.textContent = "";
+    el.className = `char-avatar ${sizeClass}`;
+    el.dataset.charId = String(char.id);
+    el.setAttribute("aria-label", char.name);
+    el.setAttribute("role", "img");
+}
+
+function characterAvatarHTML(char, sizeClass = "char-avatar-md") {
+    return `<div class="char-avatar ${sizeClass}" data-char-id="${char.id}" aria-label="${char.name}" role="img"></div>`;
+}
+
+function updatePlayerBidStatus(pulsePlayer = null) {
+    const leader = GameState.auction.currentBidder;
+    const passed = GameState.auction.passed;
+
+    [0, 1].forEach(i => {
+        const p = i + 1;
+        const playerBid = GameState.auction.playerBids[i];
+        $(`pbs-p${p}-name`).textContent = GameState.players[i].name;
+        $(`pbs-p${p}-amount`).textContent = `$${playerBid}`;
+
+        const statusEl = $(`pbs-p${p}-state`);
+        const blockEl = $(`p${p}-bid-status`);
+        blockEl.classList.remove("leading", "passed", "idle", "bid-pulse");
+
+        if (passed[i]) {
+            statusEl.textContent = "PASSED";
+            blockEl.classList.add("passed");
+        } else if (leader === i) {
+            statusEl.textContent = "LEADING";
+            blockEl.classList.add("leading");
+        } else if (playerBid > 0) {
+            statusEl.textContent = "OUTBID";
+            blockEl.classList.add("idle");
+        } else {
+            statusEl.textContent = "NO BID";
+            blockEl.classList.add("idle");
+        }
+
+        if (pulsePlayer === i) {
+            blockEl.classList.add("bid-pulse");
+            setTimeout(() => blockEl.classList.remove("bid-pulse"), 300);
+        }
+    });
+}
+
+function shuffleArray(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+        const j = rand(0, i);
+        [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+}
+
+function resetGameState() {
+    if (GameState.auction.timer) {
+        clearInterval(GameState.auction.timer);
+    }
+
+    GameState.auction = {
+        ...GameState.auction,
+        pool: [],
+        currentIndex: 0,
+        currentBid: 0,
+        currentBidder: null,
+        playerBids: [0, 0],
+        timer: null,
+        timeLeft: 10,
+        maxTime: 10,
+        passed: [false, false],
+        charBonus: null,
+        priceModifier: 1,
+        timerModifier: 1,
+        resolving: false,
+    };
+
+    GameState.battle = {
+        ...GameState.battle,
+        matchIndex: 0,
+        matches: [],
+        currentFighters: null,
+        turnCount: 0,
+        battleOver: false,
+    };
+
+    GameState.powerRevealSkip = false;
+    GameState.players.forEach(player => {
+        player.budget = 30;
+        player.team = [];
+        player.score = 0;
+        player.activeSynergies = [];
+    });
+}
+
+// ==================== PARTICLE BACKGROUND ====================
+const particleCanvas = $("particle-canvas");
+const pCtx = particleCanvas.getContext("2d");
+let particles = [];
+
+function initParticles() {
+    particleCanvas.width = window.innerWidth;
+    particleCanvas.height = window.innerHeight;
+    particles = [];
+    for (let i = 0; i < 80; i++) {
+        particles.push({
+            x: Math.random() * particleCanvas.width,
+            y: Math.random() * particleCanvas.height,
+            vx: (Math.random() - 0.5) * 0.5,
+            vy: (Math.random() - 0.5) * 0.5,
+            size: Math.random() * 2 + 0.5,
+            alpha: Math.random() * 0.5 + 0.1,
+            hue: Math.random() * 60 + 260, // purple-blue range
+        });
+    }
+}
+
+function animateParticles() {
+    pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+    particles.forEach(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        if (p.x < 0) p.x = particleCanvas.width;
+        if (p.x > particleCanvas.width) p.x = 0;
+        if (p.y < 0) p.y = particleCanvas.height;
+        if (p.y > particleCanvas.height) p.y = 0;
+        pCtx.beginPath();
+        pCtx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        pCtx.fillStyle = `hsla(${p.hue}, 80%, 70%, ${p.alpha})`;
+        pCtx.fill();
+    });
+
+    // Draw connections
+    for (let i = 0; i < particles.length; i++) {
+        for (let j = i + 1; j < particles.length; j++) {
+            const dx = particles[i].x - particles[j].x;
+            const dy = particles[i].y - particles[j].y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist < 120) {
+                pCtx.beginPath();
+                pCtx.moveTo(particles[i].x, particles[i].y);
+                pCtx.lineTo(particles[j].x, particles[j].y);
+                pCtx.strokeStyle = `hsla(270, 70%, 60%, ${0.15 * (1 - dist / 120)})`;
+                pCtx.lineWidth = 0.5;
+                pCtx.stroke();
+            }
+        }
+    }
+    requestAnimationFrame(animateParticles);
+}
+
+window.addEventListener("resize", () => {
+    particleCanvas.width = window.innerWidth;
+    particleCanvas.height = window.innerHeight;
+});
+
+initParticles();
+animateParticles();
+
+// ==================== SCREEN NAVIGATION ====================
+function showScreen(screenId) {
+    qsa(".screen").forEach(s => s.classList.remove("active"));
+    $(screenId).classList.add("active");
+    GameState.currentScreen = screenId;
+}
+
+// ==================== SOUND TOGGLE ====================
+const soundToggleBtn = $("sound-toggle");
+soundToggleBtn.addEventListener("click", () => {
+    GameState.soundEnabled = !GameState.soundEnabled;
+    if (!GameState.soundEnabled) {
+        stopCharacterTheme();
+    }
+    soundToggleBtn.textContent = GameState.soundEnabled ? "🔊" : "🔇";
+    soundToggleBtn.classList.toggle("muted", !GameState.soundEnabled);
+    localStorage.setItem("aaa_sound", GameState.soundEnabled ? "on" : "off");
+});
+
+// Restore sound preference
+if (localStorage.getItem("aaa_sound") === "off") {
+    GameState.soundEnabled = false;
+    soundToggleBtn.textContent = "🔇";
+    soundToggleBtn.classList.add("muted");
+}
+
+// ==================== SOUND EFFECTS (Web Audio API) ====================
+const AudioCtx = window.AudioContext || window.webkitAudioContext;
+let audioCtx;
+
+function initAudio() {
+    if (!audioCtx) audioCtx = new AudioCtx();
+}
+
+function ensureAudioReady() {
+    if (!GameState.soundEnabled) return;
+    initAudio();
+    if (audioCtx && audioCtx.state === "suspended") {
+        audioCtx.resume();
+    }
+}
+
+function playTone(freq, duration, type = "sine", volume = 0.1) {
+    if (!GameState.soundEnabled) return;
+    ensureAudioReady();
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+    osc.connect(gain);
+    gain.connect(audioCtx.destination);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+}
+
+function sfxBid() { playTone(600, 0.15, "square", 0.1); }
+
+function sfxBidAmount(amount) {
+    const freqs = { 1: 520, 2: 680, 5: 880 };
+    playTone(freqs[amount] || 600, 0.12, "square", 0.12);
+}
+function sfxPass() { playTone(200, 0.2, "sawtooth", 0.05); }
+function sfxSold() {
+    playTone(523, 0.1, "square", 0.1);
+    setTimeout(() => playTone(659, 0.1, "square", 0.1), 100);
+    setTimeout(() => playTone(784, 0.2, "square", 0.1), 200);
+}
+function sfxHit() { playTone(150, 0.15, "sawtooth", 0.12); }
+function sfxUltimate() {
+    playTone(440, 0.1, "square", 0.12);
+    setTimeout(() => playTone(880, 0.1, "square", 0.12), 80);
+    setTimeout(() => playTone(1320, 0.3, "square", 0.12), 160);
+}
+function sfxVictory() {
+    [523, 659, 784, 1047].forEach((f, i) => {
+        setTimeout(() => playTone(f, 0.3, "square", 0.08), i * 150);
+    });
+}
+function sfxEvent() {
+    playTone(880, 0.1, "sine", 0.1);
+    setTimeout(() => playTone(660, 0.15, "sine", 0.1), 100);
+}
+
+/** Loud hype sting when an X-tier character appears (auction / reveal). */
+function sfxXTierReveal() {
+    if (!GameState.soundEnabled) return;
+    initAudio();
+    if (!audioCtx) return;
+    if (audioCtx.state === "suspended") {
+        audioCtx.resume();
+    }
+
+    const t0 = audioCtx.currentTime;
+    const master = audioCtx.createGain();
+    master.gain.setValueAtTime(0.92, t0);
+    master.connect(audioCtx.destination);
+
+    function brassStab(at, freq, dur, vol) {
+        const osc = audioCtx.createOscillator();
+        const osc2 = audioCtx.createOscillator();
+        const filter = audioCtx.createBiquadFilter();
+        const g = audioCtx.createGain();
+        osc.type = "sawtooth";
+        osc2.type = "square";
+        osc.frequency.setValueAtTime(freq, at);
+        osc2.frequency.setValueAtTime(freq * 1.005, at);
+        filter.type = "lowpass";
+        filter.frequency.setValueAtTime(2800, at);
+        filter.frequency.exponentialRampToValueAtTime(900, at + dur);
+        filter.Q.setValueAtTime(2.5, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(vol, at + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+        osc.connect(filter);
+        osc2.connect(filter);
+        filter.connect(g);
+        g.connect(master);
+        osc.start(at);
+        osc2.start(at);
+        osc.stop(at + dur + 0.05);
+        osc2.stop(at + dur + 0.05);
+    }
+
+    // Sub impact — stadium boom
+    const sub = audioCtx.createOscillator();
+    const subG = audioCtx.createGain();
+    sub.type = "sine";
+    sub.frequency.setValueAtTime(90, t0);
+    sub.frequency.exponentialRampToValueAtTime(38, t0 + 0.42);
+    subG.gain.setValueAtTime(0.0001, t0);
+    subG.gain.exponentialRampToValueAtTime(0.42, t0 + 0.018);
+    subG.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+    sub.connect(subG);
+    subG.connect(master);
+    sub.start(t0);
+    sub.stop(t0 + 0.6);
+
+    // Noise crash — cymbal / crowd-energy wash
+    const noiseDur = 0.55;
+    const noiseBuf = audioCtx.createBuffer(1, Math.floor(audioCtx.sampleRate * noiseDur), audioCtx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+    const noise = audioCtx.createBufferSource();
+    noise.buffer = noiseBuf;
+    const noiseFilter = audioCtx.createBiquadFilter();
+    noiseFilter.type = "highpass";
+    noiseFilter.frequency.setValueAtTime(1200, t0);
+    const noiseG = audioCtx.createGain();
+    noiseG.gain.setValueAtTime(0.0001, t0);
+    noiseG.gain.exponentialRampToValueAtTime(0.22, t0 + 0.025);
+    noiseG.gain.exponentialRampToValueAtTime(0.0001, t0 + noiseDur);
+    noise.connect(noiseFilter);
+    noiseFilter.connect(noiseG);
+    noiseG.connect(master);
+    noise.start(t0);
+
+    // Rising fanfare — fast major run (match-day / promo hype)
+    const run = [261.63, 329.63, 392, 493.88, 587.33, 659.25, 783.99, 987.77, 1174.66];
+    run.forEach((freq, i) => {
+        brassStab(t0 + 0.04 + i * 0.065, freq, 0.2, 0.11 + i * 0.008);
+    });
+
+    // Final chord stab — dopamine hit
+    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+        brassStab(t0 + 0.62 + i * 0.01, freq, 0.55, 0.16);
+    });
+
+    // Sparkle layer on top
+    [1318.5, 1567.98, 2093].forEach((freq, i) => {
+        const osc = audioCtx.createOscillator();
+        const g = audioCtx.createGain();
+        osc.type = "triangle";
+        const at = t0 + 0.68 + i * 0.04;
+        osc.frequency.setValueAtTime(freq, at);
+        g.gain.setValueAtTime(0.0001, at);
+        g.gain.exponentialRampToValueAtTime(0.12, at + 0.02);
+        g.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
+        osc.connect(g);
+        g.connect(master);
+        osc.start(at);
+        osc.stop(at + 0.4);
+    });
+}
+
+socket.on("connect", () => {
+    GameState.online.connected = true;
+});
+
+socket.on("room:state", (state) => {
+    GameState.online.roomCode = state.roomCode || "";
+    GameState.online.myPlayerIndex = state.myPlayerIndex;
+    GameState.online.state = state;
+    $("room-code-input").value = state.roomCode || $("room-code-input").value;
+
+    if (state.players && state.players.length >= 2) {
+        GameState.players[0].name = state.players[0]?.name || GameState.players[0].name;
+        GameState.players[1].name = state.players[1]?.name || GameState.players[1].name;
+        $("p1-name").value = GameState.players[0].name;
+        $("p2-name").value = GameState.players[1].name;
+        $("online-room-status").textContent = `Room ${state.roomCode} ready — match is live.`;
+    }
+
+    if (state.started && state.auction && state.auction.currentChar) {
+        const char = state.auction.currentChar;
+        const p1 = state.players[0];
+        const p2 = state.players[1];
+
+        $("auction-p1-name").textContent = p1?.name || "Player 1";
+        $("auction-p2-name").textContent = p2?.name || "Player 2";
+        $("bid-p1-label").textContent = p1?.name || "Player 1";
+        $("bid-p2-label").textContent = p2?.name || "Player 2";
+        $("auction-p1-budget").textContent = formatBudget(p1?.budget ?? 30);
+        $("auction-p2-budget").textContent = formatBudget(p2?.budget ?? 30);
+        $("auction-p1-cards").textContent = `${p1?.teamCount ?? 0}/${GameState.maxCards} cards`;
+        $("auction-p2-cards").textContent = `${p2?.teamCount ?? 0}/${GameState.maxCards} cards`;
+        $("auction-round").textContent = `${state.auction.currentIndex + 1} / ${state.auction.poolSize}`;
+        $("timer-text").textContent = state.auction.timeLeft;
+        $("card-tier").textContent = char.tier;
+        $("card-name").textContent = char.name;
+        $("card-series").textContent = char.series;
+        $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+        $("card-base-price").textContent = char.baseCost;
+        $("card-tags").innerHTML = (char.tags || []).map(t => `<span class="tag">${t}</span>`).join("");
+
+        $("pbs-p1-amount").textContent = `$${state.auction.playerBids[0] || 0}`;
+        $("pbs-p2-amount").textContent = `$${state.auction.playerBids[1] || 0}`;
+        $("pbs-p1-state").textContent = state.auction.currentBidder === 0 ? "LEADING" : "NO BID";
+        $("pbs-p2-state").textContent = state.auction.currentBidder === 1 ? "LEADING" : "NO BID";
+
+        if (GameState.currentScreen !== "screen-auction") {
+            showScreen("screen-auction");
+        }
+    }
+});
+
+socket.on("room:error", ({ message }) => {
+    $("online-room-status").textContent = message;
+});
+
+// ==================== TITLE SCREEN ====================
+$("btn-start").addEventListener("click", () => {
+    initAudio();
+    sfxBid();
+    fillPlayerSetupFromSavedName();
+    showScreen("screen-name-entry");
+});
+
+$("btn-save-player-name").addEventListener("click", () => {
+    const name = ($("player-name").value || "Player").trim() || "Player";
+    localStorage.setItem(PLAYER_NAME_KEY, name);
+    GameState.players[0].name = name;
+    $("p1-name").value = name;
+    showScreen("screen-mode-select");
+});
+
+$("player-name").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+        $("btn-save-player-name").click();
+    }
+});
+
+// ==================== MODE SELECT ====================
+qsa(".mode-btn").forEach(button => {
+    button.addEventListener("click", () => {
+        const mode = button.dataset.mode;
+        prepareLobbyForMode(mode);
+    });
+});
+
+// ==================== LOBBY ====================
+function startOnlineRoomFlow() {
+    const playerName = ($("p1-name").value || "Player").trim() || "Player";
+    const roomCodeInput = ($("room-code-input").value || "").trim().toUpperCase();
+
+    if (!roomCodeInput) {
+        socket.emit("online:createRoom", { name: playerName });
+        $("online-room-status").textContent = "Creating room...";
+        return;
+    }
+
+    socket.emit("online:joinRoom", { roomCode: roomCodeInput, name: playerName });
+    $("online-room-status").textContent = `Joining room ${roomCodeInput}...`;
+}
+
+$("btn-create-room").addEventListener("click", () => {
+    startOnlineRoomFlow();
+});
+
+$("btn-join-room").addEventListener("click", () => {
+    startOnlineRoomFlow();
+});
+
+$("btn-start-auction").addEventListener("click", () => {
+    if (GameState.currentMode === "online") {
+        startOnlineRoomFlow();
+        return;
+    }
+
+    const savedName = (localStorage.getItem(PLAYER_NAME_KEY) || "Player").trim() || "Player";
+    GameState.players[0].name = ($("p1-name").value || savedName).trim() || savedName || "Player";
+    GameState.players[1].name = ($("p2-name").value || (GameState.currentMode === "friend" ? "Player 2" : "Astra AI")).trim() || "Player 2";
+    resetGameState();
+    sfxBid();
+    startAuction();
+});
+
+// ==================== AUCTION ENGINE ====================
+function startAuction() {
+    // Pick 20 characters from the pool based on tier rarity
+    const tierWeights = { "X": 8, "SSS": 12, "S": 15, "A": 18, "B": 24, "C": 28 };
+    let weightedPool = [];
+
+    // Create a bigger pool so X-tier characters appear much more often without dominating every slot.
+    CHARACTER_DB.forEach(char => {
+        const weight = tierWeights[char.tier] || 15;
+        for (let i = 0; i < weight; i++) {
+            weightedPool.push(char);
+        }
+    });
+
+    const pool = [];
+    for (let i = 0; i < GameState.totalAuctionRounds; i++) {
+        // Pick random from weighted pool, but ensure we don't pick duplicates if possible
+        let attempts = 0;
+        let selectedChar = null;
+        while (attempts < 50) {
+            const randomIndex = Math.floor(Math.random() * weightedPool.length);
+            const candidate = weightedPool[randomIndex];
+            if (!pool.find(c => c.id === candidate.id)) {
+                selectedChar = candidate;
+                break;
+            }
+            attempts++;
+        }
+        if (!selectedChar) {
+            // Fallback if we somehow can't find a unique one
+            selectedChar = weightedPool[Math.floor(Math.random() * weightedPool.length)];
+        }
+        pool.push(selectedChar);
+    }
+    
+    GameState.auction.pool = pool;
+    GameState.auction.currentIndex = 0;
+    GameState.auction.charBonus = null;
+    GameState.auction.priceModifier = 1;
+    GameState.auction.timerModifier = 1;
+
+    $("auction-p1-name").textContent = GameState.players[0].name;
+    $("auction-p2-name").textContent = GameState.players[1].name;
+    $("bid-p1-label").textContent = GameState.players[0].name;
+    $("bid-p2-label").textContent = GameState.players[1].name;
+
+    $("auction-log").innerHTML = '<div class="log-entry log-system">⚡ Welcome to the Auction! Let the bidding begin...</div>';
+
+    showScreen("screen-auction");
+    presentCharacter();
+}
+
+function updateAuctionUI() {
+    $("auction-p1-budget").textContent = formatBudget(GameState.players[0].budget);
+    $("auction-p2-budget").textContent = formatBudget(GameState.players[1].budget);
+    $("auction-p1-cards").textContent = `${GameState.players[0].team.length}/${GameState.maxCards} cards`;
+    $("auction-p2-cards").textContent = `${GameState.players[1].team.length}/${GameState.maxCards} cards`;
+    $("auction-round").textContent = `${GameState.auction.currentIndex + 1} / ${GameState.auction.pool.length}`;
+
+    // Disable bid buttons if can't afford or team full
+    [1, 2].forEach(p => {
+        const idx = p - 1;
+        const player = GameState.players[idx];
+        const btns = qsa(`.p${p}-btn`);
+        const teamFull = player.team.length >= GameState.maxCards;
+        btns.forEach(btn => {
+            const amount = parseInt(btn.dataset.amount) || 0;
+            const newBid = GameState.auction.currentBid + amount;
+            if (amount > 0) {
+                btn.disabled = teamFull || newBid > player.budget;
+            } else {
+                // PASS button
+                btn.disabled = false;
+            }
+        });
+    });
+}
+
+function presentCharacter() {
+    const idx = GameState.auction.currentIndex;
+    if (idx >= GameState.auction.pool.length) {
+        endAuction();
+        return;
+    }
+
+    // Check for market event (30% chance after round 3)
+    if (idx >= 3 && Math.random() < 0.3) {
+        triggerMarketEvent();
+    }
+
+    const char = { ...GameState.auction.pool[idx] };
+
+    // Apply bonuses from previous events
+    if (GameState.auction.charBonus) {
+        Object.keys(GameState.auction.charBonus).forEach(stat => {
+            char[stat] = (char[stat] || 0) + GameState.auction.charBonus[stat];
+        });
+        GameState.auction.charBonus = null;
+    }
+    if (GameState.auction.priceModifier !== 1) {
+        char.baseCost = Math.max(1, Math.round(char.baseCost * GameState.auction.priceModifier));
+        GameState.auction.priceModifier = 1;
+    }
+
+    // Store modified char back
+    GameState.auction.pool[idx] = char;
+
+    // Update card display
+    const card = $("auction-card");
+    const tierClass = `tier-${char.tier.toLowerCase()}`;
+    card.className = `auction-card ${tierClass} card-enter`;
+    card.dataset.id = char.id;
+    if (["X", "SSS", "S"].includes(char.tier)) {
+        card.classList.add("tier-spotlight");
+        setTimeout(() => card.classList.remove("tier-spotlight"), 1400);
+    }
+    $("card-tier").textContent = char.tier;
+    setCharacterAvatar($("card-avatar"), char, "char-avatar-xl card-avatar");
+    $("card-name").textContent = char.name;
+    $("card-series").textContent = char.series;
+    $("card-power").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+    $("card-base-price").textContent = char.baseCost;
+    $("card-tags").innerHTML = char.tags.map(t => `<span class="tag">${t}</span>`).join("");
+    playCharacterTheme(char);
+
+    // Reset bidding (starts at $0)
+    GameState.auction.currentBid = 0;
+    GameState.auction.currentBidder = null;
+    GameState.auction.playerBids = [0, 0];
+    GameState.auction.passed = [false, false];
+    GameState.auction.resolving = false;
+
+    $("card-result-overlay").classList.add("hidden");
+    $("card-result-overlay").classList.remove("show");
+
+    updatePlayerBidStatus();
+    updateAuctionUI();
+    startBidTimer();
+    syncAiControls();
+
+    if (GameState.currentMode === "ai") {
+        scheduleAiDecision();
+    }
+
+    if (char.tier === "SSS") {
+        sfxXTierReveal();
+    }
+
+    // Remove animation class after it plays
+    setTimeout(() => card.classList.remove("card-enter"), 600);
+}
+
+function startBidTimer() {
+    clearInterval(GameState.auction.timer);
+    const maxTime = Math.round(10 * GameState.auction.timerModifier);
+    GameState.auction.maxTime = maxTime;
+    GameState.auction.timeLeft = maxTime;
+    GameState.auction.timerModifier = 1;
+
+    updateTimerUI();
+
+    GameState.auction.timer = setInterval(() => {
+        GameState.auction.timeLeft--;
+        updateTimerUI();
+        if (GameState.auction.timeLeft <= 3) {
+            playTone(800 + (3 - GameState.auction.timeLeft) * 200, 0.08, "square", 0.06);
+        }
+        if (GameState.auction.timeLeft <= 0) {
+            clearInterval(GameState.auction.timer);
+            resolveBid();
+        }
+    }, 1000);
+}
+
+function updateTimerUI() {
+    $("timer-text").textContent = GameState.auction.timeLeft;
+    const progress = $("timer-progress");
+    const circumference = 2 * Math.PI * 45;
+    const pct = GameState.auction.timeLeft / GameState.auction.maxTime;
+    progress.style.strokeDasharray = circumference;
+    progress.style.strokeDashoffset = circumference * (1 - pct);
+
+    if (pct < 0.3) {
+        progress.style.stroke = "#ff4444";
+    } else if (pct < 0.6) {
+        progress.style.stroke = "#ffaa00";
+    } else {
+        progress.style.stroke = "#a855f7";
+    }
+}
+
+function syncAiControls() {
+    const aiMode = GameState.currentMode === "ai";
+    qsa(".p2-btn, .p2-btn-pass").forEach(button => {
+        button.disabled = aiMode;
+        button.title = aiMode ? "AI is controlling this side" : "Bid for Player 2";
+    });
+}
+
+function getAiCharacterValue(char) {
+    const tierValue = { C: 5, B: 9, A: 14, S: 21, SSS: 34, X: 52 };
+    const tagBoost = (char.tags || []).includes("Villain") ? 3 : 0;
+    const powerBoost = Math.max(0, Math.round(getCharacterPowerLevel(char) / 180));
+    const rosterGapBoost = (GameState.maxCards - GameState.players[1].team.length) * 2;
+    return (tierValue[char.tier] || 8) + tagBoost + powerBoost + rosterGapBoost;
+}
+
+function getAiBidDecision(char) {
+    const aiPlayer = GameState.players[1];
+    const humanPlayer = GameState.players[0];
+    const currentBid = GameState.auction.currentBid || 0;
+    const currentLeader = GameState.auction.currentBidder;
+    const characterValue = getAiCharacterValue(char);
+    const budgetComfort = Math.min(aiPlayer.budget, Math.max(8, Math.round(characterValue * 0.8)));
+
+    if (aiPlayer.team.length >= GameState.maxCards) return 0;
+    if (currentBid === 0) {
+        if (characterValue >= 20 && aiPlayer.budget >= 1 && Math.random() < (characterValue >= 40 ? 0.9 : 0.6)) {
+            return char.tier === "X" || char.tier === "SSS" ? 5 : (characterValue >= 28 ? 2 : 1);
+        }
+        return 0;
+    }
+
+    if (currentLeader === 1) {
+        return 0;
+    }
+
+    const isHighValue = characterValue >= 24;
+    const stillWorthIt = currentBid <= budgetComfort && currentBid <= Math.max(6, characterValue * 0.8);
+    const shouldPressure = currentBid < Math.max(6, characterValue * 0.55) && isHighValue && Math.random() < 0.7;
+    const shouldRetreat = currentBid >= budgetComfort || currentBid > humanPlayer.budget * 0.9;
+
+    if (shouldRetreat) return 0;
+    if (stillWorthIt || shouldPressure) {
+        const step = currentBid >= 10 ? 2 : currentBid >= 5 ? 2 : 1;
+        const amount = Math.min(step, Math.max(1, Math.min(aiPlayer.budget - currentBid, budgetComfort - currentBid + 1, 5)));
+        return amount > 0 && currentBid + amount <= aiPlayer.budget ? amount : 0;
+    }
+
+    return 0;
+}
+
+function scheduleAiDecision() {
+    if (GameState.currentMode !== "ai" || GameState.currentScreen !== "screen-auction" || GameState.aiThinking || GameState.auction.resolving) {
+        return;
+    }
+    if (GameState.auction.currentBidder === 1) {
+        return;
+    }
+
+    GameState.aiThinking = true;
+    const char = GameState.auction.pool[GameState.auction.currentIndex];
+    const delay = 1100 + Math.random() * 900;
+
+    setTimeout(() => {
+        if (GameState.currentMode !== "ai" || GameState.currentScreen !== "screen-auction" || GameState.auction.resolving) {
+            GameState.aiThinking = false;
+            return;
+        }
+
+        const action = getAiBidDecision(char);
+        if (action > 0) {
+            handleBid(1, action);
+        } else if (GameState.auction.currentBid === 0 || GameState.auction.currentBidder === 0) {
+            handleBid(1, 0);
+        }
+
+        GameState.aiThinking = false;
+    }, delay);
+}
+
+function triggerMarketEvent() {
+    const event = MARKET_EVENTS[rand(0, MARKET_EVENTS.length - 1)];
+    sfxEvent();
+
+    if (event.effect) {
+        GameState.players.forEach(p => event.effect(p));
+    }
+    if (event.charBonus) {
+        GameState.auction.charBonus = event.charBonus;
+    }
+    if (event.priceModifier) {
+        GameState.auction.priceModifier = event.priceModifier;
+    }
+    if (event.timerModifier) {
+        GameState.auction.timerModifier = event.timerModifier;
+    }
+
+    // Show popup
+    const popup = $("market-event-popup");
+    $("event-title").textContent = `${event.icon} ${event.name}`;
+    $("event-desc").textContent = event.description;
+    popup.classList.add("show");
+    setTimeout(() => popup.classList.remove("show"), 2500);
+
+    addAuctionLog(`${event.icon} EVENT: ${event.name} — ${event.description}`, "log-event");
+    updateAuctionUI();
+}
+
+// ==================== BIDDING ====================
+function handleBid(playerIndex, amount) {
+    if (GameState.auction.resolving) return;
+
+    const player = GameState.players[playerIndex];
+
+    if (GameState.currentMode === "ai" && playerIndex === 1 && amount > 0) {
+        const aiMax = Math.min(player.budget, 30);
+        if (GameState.auction.currentBid + amount > aiMax) {
+            return;
+        }
+    }
+
+    if (amount === 0) {
+        // PASS
+        GameState.auction.passed[playerIndex] = true;
+        sfxPass();
+        addAuctionLog(`${player.name} passes!`, `log-p${playerIndex + 1}`);
+        updatePlayerBidStatus();
+
+        // If both pass or only one bidder passed and the other has the bid
+        if (GameState.auction.passed[0] && GameState.auction.passed[1]) {
+            clearInterval(GameState.auction.timer);
+            resolveBid();
+            return;
+        }
+        // If current bidder is the other player and this one passes, auto-sell
+        if (GameState.auction.currentBidder !== null && GameState.auction.currentBidder !== playerIndex) {
+            clearInterval(GameState.auction.timer);
+            resolveBid();
+            return;
+        }
+        return;
+    }
+
+    const newBid = GameState.auction.currentBid + amount;
+    if (newBid > player.budget) return;
+    if (player.team.length >= GameState.maxCards) return;
+
+    GameState.auction.currentBid = newBid;
+    GameState.auction.currentBidder = playerIndex;
+    GameState.auction.playerBids[playerIndex] = newBid;
+    GameState.auction.passed = [false, false]; // Reset passes on new bid
+
+    sfxBidAmount(amount);
+
+    updatePlayerBidStatus(playerIndex);
+    addAuctionLog(`${player.name} bids $${newBid}!`, `log-p${playerIndex + 1}`);
+
+    // Reset timer on bid
+    GameState.auction.timeLeft = Math.min(GameState.auction.timeLeft + 3, GameState.auction.maxTime);
+    updateTimerUI();
+    updateAuctionUI();
+
+    if (GameState.currentMode === "ai" && playerIndex === 0) {
+        scheduleAiDecision();
+    }
+}
+
+async function resolveBid() {
+    if (GameState.auction.resolving) return;
+    GameState.auction.resolving = true;
+    clearInterval(GameState.auction.timer);
+
+    qsa(".btn-bid, .btn-bid-pass").forEach(btn => { btn.disabled = true; });
+
+    const char = GameState.auction.pool[GameState.auction.currentIndex];
+    const overlay = $("card-result-overlay");
+    const resultText = $("card-result-text");
+
+    if (GameState.auction.currentBidder !== null) {
+        const winner = GameState.players[GameState.auction.currentBidder];
+        winner.budget -= GameState.auction.currentBid;
+        winner.team.push({ ...char });
+        sfxSold();
+        resultText.textContent = `${winner.name} has won ${char.name}!`;
+        resultText.className = `card-result-text winner p${GameState.auction.currentBidder + 1}-win`;
+        addAuctionLog(
+            `🔨 SOLD! ${char.name} goes to ${winner.name} for $${GameState.auction.currentBid}!`,
+            "log-sold"
+        );
+    } else {
+        resultText.textContent = `${char.name} goes unsold!`;
+        resultText.className = "card-result-text unsold";
+        addAuctionLog(`${char.name} goes unsold! No bids.`, "log-system");
+    }
+
+    overlay.classList.remove("hidden");
+    overlay.classList.add("show");
+    await sleep(2200);
+    overlay.classList.remove("show");
+    overlay.classList.add("hidden");
+
+    const bothFull = GameState.players[0].team.length >= GameState.maxCards &&
+        GameState.players[1].team.length >= GameState.maxCards;
+
+    GameState.auction.currentIndex++;
+    updateAuctionUI();
+
+    if (bothFull || GameState.auction.currentIndex >= GameState.auction.pool.length) {
+        endAuction();
+    } else {
+        presentCharacter();
+    }
+}
+
+function addAuctionLog(message, className = "") {
+    const log = $("auction-log");
+    const entry = document.createElement("div");
+    entry.className = `log-entry ${className}`;
+    entry.textContent = message;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+// Attach bid listeners
+document.addEventListener("click", (e) => {
+    if (e.target.classList.contains("btn-bid") || e.target.classList.contains("btn-bid-pass")) {
+        ensureAudioReady();
+        const player = parseInt(e.target.dataset.player) - 1;
+        const amount = parseInt(e.target.dataset.amount);
+        if (!e.target.disabled) {
+            if (GameState.currentMode === "online") {
+                const roomCode = GameState.online.roomCode || $("room-code-input").value.trim().toUpperCase();
+                if (roomCode && GameState.online.myPlayerIndex !== null) {
+                    socket.emit("auction:bid", {
+                        roomCode,
+                        playerIndex: GameState.online.myPlayerIndex,
+                        amount,
+                    });
+                    return;
+                }
+            }
+// Keyboard shortcuts for bidding
+document.addEventListener("keydown", (e) => {
+    if (GameState.currentScreen !== "screen-auction") return;
+
+    // Player 1: Q/W/E = +1/+2/+5, R = Pass
+    if (e.key === "q" || e.key === "Q") handleBid(0, 1);
+    if (e.key === "w" || e.key === "W") handleBid(0, 2);
+    if (e.key === "e" || e.key === "E") handleBid(0, 5);
+    if (e.key === "r" || e.key === "R") handleBid(0, 0);
+
+    if (GameState.currentMode === "ai") return;
+
+    // Player 2: U/I/O = +1/+2/+5, P = Pass
+    if (e.key === "u" || e.key === "U") handleBid(1, 1);
+    if (e.key === "i" || e.key === "I") handleBid(1, 2);
+    if (e.key === "o" || e.key === "O") handleBid(1, 5);
+    if (e.key === "p" || e.key === "P") handleBid(1, 0);
+});
+
+// ==================== END AUCTION / TEAM REVIEW ====================
+function endAuction() {
+    const anyWon = GameState.players.some(player => player.team.length > 0);
+
+    if (!anyWon) {
+        addAuctionLog("🏁 No bids were placed, so no one receives any characters.", "log-system");
+    } else {
+        GameState.players.forEach(player => {
+            while (player.team.length < GameState.maxCards) {
+                const remaining = CHARACTER_DB.filter(c =>
+                    !GameState.players[0].team.some(t => t.id === c.id) &&
+                    !GameState.players[1].team.some(t => t.id === c.id)
+                );
+                if (remaining.length === 0) break;
+                const freeChar = remaining[rand(0, remaining.length - 1)];
+                player.team.push({ ...freeChar });
+                addAuctionLog(`🎁 ${player.name} gets ${freeChar.name} for free (unsold)!`, "log-system");
+            }
+        });
+    }
+
+    applySynergies();
+
+    setTimeout(() => {
+        showScreen("screen-power-reveal");
+        startPowerRevealSequence();
+    }, 1000);
+}
+
+// ==================== POWER REVEAL (post-auction) ====================
+let powerRevealAbort = null;
+
+function setPowerPhase(phaseId) {
+    qsa("#screen-power-reveal .power-reveal-phase").forEach(el => el.classList.add("hidden"));
+    if (phaseId) $(phaseId).classList.remove("hidden");
+}
+
+function formatPowerLevel(n) {
+    return n.toLocaleString("en-US");
+}
+
+async function flashFighter(char) {
+    const card = $("power-flash-card");
+    const tierClass = `tier-${char.tier.toLowerCase()}`;
+    card.className = `power-flash-card ${tierClass}`;
+    card.classList.remove("flash-in");
+    void card.offsetWidth;
+    if (["X", "SSS", "S"].includes(char.tier)) {
+        card.classList.add("tier-spotlight");
+    }
+    setCharacterAvatar($("power-flash-avatar"), char, "char-avatar-lg");
+    $("power-flash-name").textContent = char.name;
+    $("power-flash-value").textContent = formatPowerLevel(getCharacterPowerLevel(char));
+    card.classList.add("flash-in");
+    if (char.tier === "SSS") {
+        sfxXTierReveal();
+    } else if (char.tier === "X") {
+        // X cards keep their custom character audio; no extra generic reveal sting here.
+    } else {
+        sfxBid();
+    }
+    await sleep(char.tier === "X" ? 2000 : 1400);
+}
+
+async function revealPlayerRoster(playerIndex) {
+    const player = GameState.players[playerIndex];
+    $("power-roster-name").textContent = player.name;
+    $("power-roster-name").className = `power-roster-name ${playerIndex === 0 ? "name-red" : "name-blue"}`;
+    $("power-roster-total").classList.add("hidden");
+    $("power-flash-card").classList.remove("hidden");
+
+    for (const char of player.team) {
+        if (GameState.powerRevealSkip) return;
+        await flashFighter(char);
+    }
+
+    $("power-flash-card").classList.add("hidden");
+    $("power-roster-total-value").textContent = formatPowerLevel(teamTotalPower(player));
+    $("power-roster-total").classList.remove("hidden");
+    await sleep(1800);
+}
+
+function buildCompareList(container, team) {
+    container.innerHTML = team.map(c => `
+        <div class="power-compare-row">
+            ${characterAvatarHTML(c, "char-avatar-sm")}
+            <span class="pcr-name">${c.name}</span>
+            <span class="pcr-pl">${formatPowerLevel(getCharacterPowerLevel(c))}</span>
+        </div>
+    `).join("");
+}
+
+function buildPerFighterCharts(p1Team, p2Team, maxPl) {
+    const body = $("power-charts-body");
+    const rows = Math.max(p1Team.length, p2Team.length);
+    body.innerHTML = "";
+    for (let i = 0; i < rows; i++) {
+        const c1 = p1Team[i];
+        const c2 = p2Team[i];
+        const row = document.createElement("div");
+        row.className = "power-chart-row";
+        row.innerHTML = `
+            <div class="pcr-slot pcr-slot-red">
+                ${c1 ? `<div class="pcr-slot-label">${characterAvatarHTML(c1, "char-avatar-inline")}<span>${c1.name}</span></div>
+                <div class="pcr-bar-track"><div class="pcr-bar-fill pcr-red" data-w="${getCharacterPowerLevel(c1)}"></div></div>
+                <span class="pcr-slot-val">${formatPowerLevel(getCharacterPowerLevel(c1))}</span>` : ""}
+            </div>
+            <div class="pcr-slot pcr-slot-blue">
+                ${c2 ? `<div class="pcr-slot-label">${characterAvatarHTML(c2, "char-avatar-inline")}<span>${c2.name}</span></div>
+                <div class="pcr-bar-track"><div class="pcr-bar-fill pcr-blue" data-w="${getCharacterPowerLevel(c2)}"></div></div>
+                <span class="pcr-slot-val">${formatPowerLevel(getCharacterPowerLevel(c2))}</span>` : ""}
+            </div>
+        `;
+        body.appendChild(row);
+    }
+    requestAnimationFrame(() => {
+        body.querySelectorAll(".pcr-bar-fill").forEach(bar => {
+            const w = parseInt(bar.dataset.w, 10) || 0;
+            bar.style.width = `${Math.max(4, (w / maxPl) * 100)}%`;
+        });
+    });
+}
+
+function animateTotalBars(p1Total, p2Total) {
+    const maxTotal = Math.max(p1Total, p2Total, 1);
+    $("ptb-p1-val").textContent = formatPowerLevel(p1Total);
+    $("ptb-p2-val").textContent = formatPowerLevel(p2Total);
+    $("ptb-p1-fill").style.width = "0%";
+    $("ptb-p2-fill").style.width = "0%";
+    requestAnimationFrame(() => {
+        setTimeout(() => {
+            $("ptb-p1-fill").style.width = `${(p1Total / maxTotal) * 100}%`;
+            $("ptb-p2-fill").style.width = `${(p2Total / maxTotal) * 100}%`;
+        }, 100);
+    });
+}
+
+function announcePowerWinner(p1Total, p2Total) {
+    const p1 = GameState.players[0];
+    const p2 = GameState.players[1];
+    const banner = $("power-winner-banner");
+    let text;
+    if (p1Total > p2Total) {
+        text = `🏆 ${p1.name} WINS!`;
+        GameState.players[0].score = 1;
+        GameState.players[1].score = 0;
+    } else if (p2Total > p1Total) {
+        text = `🏆 ${p2.name} WINS!`;
+        GameState.players[0].score = 0;
+        GameState.players[1].score = 1;
+    } else {
+        text = "🤝 IT'S A TIE!";
+        GameState.players[0].score = 0;
+        GameState.players[1].score = 0;
+    }
+    $("power-winner-text").textContent = text;
+    banner.classList.remove("hidden");
+    sfxVictory();
+}
+
+async function startPowerRevealSequence() {
+    GameState.powerRevealSkip = false;
+    powerRevealAbort = { skip: false };
+
+    const p1 = GameState.players[0];
+    const p2 = GameState.players[1];
+    const p1Total = teamTotalPower(p1);
+    const p2Total = teamTotalPower(p2);
+    const maxPl = Math.max(
+        ...p1.team.map(getCharacterPowerLevel),
+        ...p2.team.map(getCharacterPowerLevel),
+        1
+    );
+
+    $("power-roster-total").classList.add("hidden");
+    $("power-flash-card").classList.remove("hidden");
+    $("power-winner-banner").classList.add("hidden");
+    $("btn-power-continue").classList.add("hidden");
+
+    setPowerPhase("power-phase-intro");
+    await sleep(1500);
+    if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
+
+    setPowerPhase("power-phase-roster");
+    await revealPlayerRoster(0);
+    if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
+
+    await revealPlayerRoster(1);
+    if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
+
+    setPowerPhase("power-phase-compare");
+    $("power-compare-p1-name").textContent = p1.name;
+    $("power-compare-p2-name").textContent = p2.name;
+    buildCompareList($("power-compare-p1-list"), p1.team);
+    buildCompareList($("power-compare-p2-list"), p2.team);
+    $("power-compare-p1-sum").textContent = formatPowerLevel(p1Total);
+    $("power-compare-p2-sum").textContent = formatPowerLevel(p2Total);
+    await sleep(2500);
+    if (GameState.powerRevealSkip) return finishPowerRevealSkipped(p1Total, p2Total, maxPl);
+
+    setPowerPhase("power-phase-charts");
+    $("power-chart-p1-label").textContent = p1.name;
+    $("power-chart-p2-label").textContent = p2.name;
+    $("ptb-p1-name").textContent = p1.name;
+    $("ptb-p2-name").textContent = p2.name;
+    buildPerFighterCharts(p1.team, p2.team, maxPl);
+    animateTotalBars(p1Total, p2Total);
+    await sleep(1200);
+    announcePowerWinner(p1Total, p2Total);
+    $("btn-power-continue").classList.remove("hidden");
+}
+
+function finishPowerRevealSkipped(p1Total, p2Total, maxPl) {
+    const p1 = GameState.players[0];
+    const p2 = GameState.players[1];
+    setPowerPhase("power-phase-charts");
+    $("power-chart-p1-label").textContent = p1.name;
+    $("power-chart-p2-label").textContent = p2.name;
+    $("ptb-p1-name").textContent = p1.name;
+    $("ptb-p2-name").textContent = p2.name;
+    buildPerFighterCharts(p1.team, p2.team, maxPl);
+    animateTotalBars(p1Total, p2Total);
+    announcePowerWinner(p1Total, p2Total);
+    $("btn-power-continue").classList.remove("hidden");
+}
+
+$("btn-skip-reveal").addEventListener("click", () => {
+    GameState.powerRevealSkip = true;
+    const p1Total = teamTotalPower(GameState.players[0]);
+    const p2Total = teamTotalPower(GameState.players[1]);
+    const maxPl = Math.max(
+        ...GameState.players[0].team.map(getCharacterPowerLevel),
+        ...GameState.players[1].team.map(getCharacterPowerLevel),
+        1
+    );
+    finishPowerRevealSkipped(p1Total, p2Total, maxPl);
+});
+
+$("btn-power-continue").addEventListener("click", () => {
+    sfxBid();
+    showTeamReview();
+    showScreen("screen-teams");
+});
+
+function applySynergies() {
+    GameState.players.forEach((player, pIdx) => {
+        player.activeSynergies = [];
+        SYNERGIES.forEach(syn => {
+            const matchingChars = player.team.filter(c => c.tags.includes(syn.requiredTag));
+            if (matchingChars.length >= syn.requiredCount) {
+                player.activeSynergies.push(syn);
+                // Apply stat bonuses to matching characters
+                matchingChars.forEach(c => {
+                    if (syn.bonus.atk) c.atk += syn.bonus.atk;
+                    if (syn.bonus.def) c.def += syn.bonus.def;
+                    if (syn.bonus.spd) c.spd += syn.bonus.spd;
+                    if (syn.bonus.sp) c.sp += syn.bonus.sp;
+                    if (syn.bonus.hp) c.hp += syn.bonus.hp;
+                });
+            }
+        });
+    });
+}
+
+function showTeamReview() {
+    [0, 1].forEach(pIdx => {
+        const player = GameState.players[pIdx];
+        const p = pIdx + 1;
+
+        $(`team-p${p}-name`).textContent = `${player.name}'s Team`;
+
+        // Calculate team power
+        const power = teamTotalPower(player);
+        $(`team-p${p}-power`).textContent = formatPowerLevel(power);
+
+        // Render cards
+        const cardsDiv = $(`team-p${p}-cards`);
+        cardsDiv.innerHTML = player.team.map(c => `
+            <div class="team-card tier-${c.tier.toLowerCase()}${["X", "SSS", "S"].includes(c.tier) ? " tier-card-animated" : ""}">
+                ${characterAvatarHTML(c, "char-avatar-md tc-avatar")}
+                <div class="tc-name">${c.name}</div>
+                <div class="tc-series">${c.series}</div>
+                <div class="tc-stats">
+                    <span>PL: ${formatPowerLevel(getCharacterPowerLevel(c))}</span>
+                </div>
+                <div class="tc-hp">HP: ${c.hp}</div>
+                <div class="tc-ultimate">🌟 ${c.ultimate}</div>
+            </div>
+        `).join("");
+
+        // Render synergies
+        const synDiv = $(`team-p${p}-synergies`);
+        if (player.activeSynergies && player.activeSynergies.length > 0) {
+            synDiv.innerHTML = `<h4>Active Synergies:</h4>` +
+                player.activeSynergies.map(s => `
+                    <div class="synergy-badge">${s.icon} ${s.name}: ${s.description}</div>
+                `).join("");
+        } else {
+            synDiv.innerHTML = `<div class="no-synergies">No synergies activated</div>`;
+        }
+    });
+}
+
+// ==================== BRACKET VISUALIZATION ====================
+$("btn-start-battle").addEventListener("click", () => {
+    sfxBid();
+    showBracket();
+});
+
+function showBracket() {
+    // Create match-ups first
+    const matches = [];
+    const count = Math.min(GameState.players[0].team.length, GameState.players[1].team.length);
+    for (let i = 0; i < count; i++) {
+        matches.push({
+            left: { ...GameState.players[0].team[i], currentHp: GameState.players[0].team[i].hp, owner: 0 },
+            right: { ...GameState.players[1].team[i], currentHp: GameState.players[1].team[i].hp, owner: 1 },
+        });
+    }
+    GameState.battle.matches = matches;
+
+    // Render bracket
+    const container = $("bracket-container");
+    container.innerHTML = matches.map((m, i) => `
+        <div class="bracket-match" style="animation-delay: ${i * 0.2}s">
+            <div class="bracket-round-label">MATCH ${i + 1}</div>
+            <div class="bracket-fighters">
+                <div class="bracket-fighter bracket-p1">
+                    ${characterAvatarHTML(m.left, "char-avatar-sm bf-avatar")}
+                    <span class="bf-name">${m.left.name}</span>
+                    <span class="bf-owner">${GameState.players[0].name}</span>
+                    <span class="bf-power">PL: ${formatPowerLevel(getCharacterPowerLevel(m.left))}</span>
+                </div>
+                <div class="bracket-vs">⚔️</div>
+                <div class="bracket-fighter bracket-p2">
+                    ${characterAvatarHTML(m.right, "char-avatar-sm bf-avatar")}
+                    <span class="bf-name">${m.right.name}</span>
+                    <span class="bf-owner">${GameState.players[1].name}</span>
+                    <span class="bf-power">PL: ${formatPowerLevel(getCharacterPowerLevel(m.right))}</span>
+                </div>
+            </div>
+        </div>
+    `).join("");
+
+    showScreen("screen-bracket");
+}
+
+$("btn-begin-fights").addEventListener("click", () => {
+    sfxBid();
+    startBattle();
+});
+
+// ==================== BATTLE ENGINE ====================
+function startBattle() {
+    // matches already set by showBracket
+    const matches = GameState.battle.matches;
+    GameState.battle.matchIndex = 0;
+    GameState.players[0].score = 0;
+    GameState.players[1].score = 0;
+
+    showScreen("screen-battle");
+    setupMatch();
+}
+
+function setupMatch() {
+    const match = GameState.battle.matches[GameState.battle.matchIndex];
+    GameState.battle.currentFighters = match;
+    GameState.battle.turnCount = 0;
+    GameState.battle.battleOver = false;
+
+    // Reset HP
+    match.left.currentHp = match.left.hp;
+    match.right.currentHp = match.right.hp;
+
+    // Update match info
+    $("battle-match-num").textContent = `${GameState.battle.matchIndex + 1} / ${GameState.battle.matches.length}`;
+    $("battle-p1-score").textContent = GameState.players[0].score;
+    $("battle-p2-score").textContent = GameState.players[1].score;
+
+    // Left fighter
+    $("fighter-left-owner").textContent = GameState.players[match.left.owner].name;
+    setCharacterAvatar($("fighter-left-emoji"), match.left, "char-avatar-lg fighter-avatar");
+    $("fighter-left-name").textContent = match.left.name;
+    $("fl-atk").textContent = `ATK: ${match.left.atk}`;
+    $("fl-def").textContent = `DEF: ${match.left.def}`;
+    $("fl-spd").textContent = `SPD: ${match.left.spd}`;
+    $("fl-sp").textContent = `SP: ${match.left.sp}`;
+    updateHP("left", match.left);
+
+    // Right fighter
+    $("fighter-right-owner").textContent = GameState.players[match.right.owner].name;
+    setCharacterAvatar($("fighter-right-emoji"), match.right, "char-avatar-lg fighter-avatar");
+    $("fighter-right-name").textContent = match.right.name;
+    $("fr-atk").textContent = `ATK: ${match.right.atk}`;
+    $("fr-def").textContent = `DEF: ${match.right.def}`;
+    $("fr-spd").textContent = `SPD: ${match.right.spd}`;
+    $("fr-sp").textContent = `SP: ${match.right.sp}`;
+    updateHP("right", match.right);
+
+    // Clear battle log
+    $("battle-log").innerHTML = `
+        <div class="blog-entry blog-announce">
+            ⚔️ ${match.left.name} vs ${match.right.name}!
+        </div>
+    `;
+
+    $("btn-next-turn").style.display = "inline-flex";
+    $("btn-next-match").style.display = "none";
+    
+    // Reset fighter positions
+    $("fighter-left").classList.remove("fighter-defeated");
+    $("fighter-right").classList.remove("fighter-defeated");
+}
+
+function updateHP(side, fighter) {
+    const pct = Math.max(0, (fighter.currentHp / fighter.hp) * 100);
+    $(`fighter-${side}-hp`).style.width = `${pct}%`;
+    $(`fighter-${side}-hp-text`).textContent = `${Math.max(0, Math.round(fighter.currentHp))} HP`;
+
+    if (pct < 25) {
+        $(`fighter-${side}-hp`).classList.add("hp-critical");
+    } else if (pct < 50) {
+        $(`fighter-${side}-hp`).classList.add("hp-low");
+        $(`fighter-${side}-hp`).classList.remove("hp-critical");
+    } else {
+        $(`fighter-${side}-hp`).classList.remove("hp-low", "hp-critical");
+    }
+}
+
+$("btn-next-turn").addEventListener("click", executeTurn);
+
+function executeTurn() {
+    if (GameState.battle.battleOver) return;
+
+    const match = GameState.battle.currentFighters;
+    GameState.battle.turnCount++;
+
+    // Determine initiative (speed check)
+    let first, second, firstSide, secondSide;
+    if (match.left.spd >= match.right.spd) {
+        first = match.left; second = match.right;
+        firstSide = "left"; secondSide = "right";
+    } else {
+        first = match.right; second = match.left;
+        firstSide = "right"; secondSide = "left";
+    }
+
+    // First attacker strikes
+    const result1 = calculateAttack(first, second);
+    addBattleLog(result1.log, firstSide);
+    second.currentHp -= result1.damage;
+    updateHP(secondSide, second);
+    animateAttack(firstSide);
+
+    if (result1.isUltimate) {
+        sfxUltimate();
+        showBattleEffect(first.ultimate + "!", first.color);
+    } else {
+        sfxHit();
+    }
+
+    // Check if second fighter is KO
+    if (second.currentHp <= 0) {
+        second.currentHp = 0;
+        updateHP(secondSide, second);
+        endMatch(first);
+        return;
+    }
+
+    // Second attacker strikes back
+    setTimeout(() => {
+        const result2 = calculateAttack(second, first);
+        addBattleLog(result2.log, secondSide);
+        first.currentHp -= result2.damage;
+        updateHP(firstSide, first);
+        animateAttack(secondSide);
+
+        if (result2.isUltimate) {
+            sfxUltimate();
+            showBattleEffect(second.ultimate + "!", second.color);
+        } else {
+            sfxHit();
+        }
+
+        if (first.currentHp <= 0) {
+            first.currentHp = 0;
+            updateHP(firstSide, first);
+            endMatch(second);
+        }
+    }, 600);
+}
+
+function calculateAttack(attacker, defender) {
+    const roll = d20();
+    const isUltimate = d100() <= attacker.sp;
+
+    let baseDamage = (attacker.atk + roll) - (defender.def / 2);
+    baseDamage = Math.max(1, baseDamage);
+
+    let damage = baseDamage;
+    let log = "";
+
+    if (isUltimate) {
+        damage = Math.round(baseDamage * attacker.ultimateMultiplier);
+        log = `🌟 ${attacker.name} uses ${attacker.ultimate}! (Roll: ${roll}) → ${damage} DMG!`;
+    } else {
+        damage = Math.round(baseDamage);
+        log = `${attacker.name} attacks! (Roll: ${roll}) → ${damage} DMG`;
+    }
+
+    // Dodge chance based on speed difference
+    if (!isUltimate && d100() <= Math.max(0, (defender.spd - attacker.spd) / 2)) {
+        damage = 0;
+        log = `💨 ${defender.name} dodges ${attacker.name}'s attack!`;
+    }
+
+    return { damage, log, isUltimate };
+}
+
+function addBattleLog(message, side = "") {
+    const log = $("battle-log");
+    const entry = document.createElement("div");
+    entry.className = `blog-entry blog-${side}`;
+    entry.textContent = message;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+}
+
+function animateAttack(side) {
+    const fighter = $(`fighter-${side}`);
+    fighter.classList.add("attacking");
+    setTimeout(() => fighter.classList.remove("attacking"), 400);
+
+    const otherSide = side === "left" ? "right" : "left";
+    const other = $(`fighter-${otherSide}`);
+    other.classList.add("hit");
+    setTimeout(() => other.classList.remove("hit"), 300);
+}
+
+function showBattleEffect(text, color) {
+    const effect = $("battle-effect");
+    effect.textContent = text;
+    effect.style.color = color;
+    effect.classList.add("show");
+    setTimeout(() => effect.classList.remove("show"), 1200);
+}
+
+function endMatch(winner) {
+    GameState.battle.battleOver = true;
+    const winnerPlayerIdx = winner.owner;
+    GameState.players[winnerPlayerIdx].score++;
+
+    addBattleLog(`🏆 ${winner.name} WINS! (+1 for ${GameState.players[winnerPlayerIdx].name})`, "blog-announce");
+
+    // Mark defeated fighter
+    const match = GameState.battle.currentFighters;
+    if (match.left.currentHp <= 0) $("fighter-left").classList.add("fighter-defeated");
+    if (match.right.currentHp <= 0) $("fighter-right").classList.add("fighter-defeated");
+
+    $("battle-p1-score").textContent = GameState.players[0].score;
+    $("battle-p2-score").textContent = GameState.players[1].score;
+
+    $("btn-next-turn").style.display = "none";
+
+    if (GameState.battle.matchIndex >= GameState.battle.matches.length - 1) {
+        // All matches done
+        setTimeout(showVictoryScreen, 1500);
+    } else {
+        $("btn-next-match").style.display = "inline-flex";
+    }
+}
+
+$("btn-next-match").addEventListener("click", () => {
+    sfxBid();
+    GameState.battle.matchIndex++;
+    setupMatch();
+});
+
+// ==================== VICTORY SCREEN ====================
+function showVictoryScreen() {
+    const p1 = GameState.players[0];
+    const p2 = GameState.players[1];
+
+    let winnerName, finalScore;
+    if (p1.score > p2.score) {
+        winnerName = p1.name;
+        finalScore = `${p1.score} - ${p2.score}`;
+    } else if (p2.score > p1.score) {
+        winnerName = p2.name;
+        finalScore = `${p2.score} - ${p1.score}`;
+    } else {
+        winnerName = "IT'S A TIE";
+        finalScore = `${p1.score} - ${p2.score}`;
+    }
+
+    $("victory-title").textContent = winnerName === "IT'S A TIE" ? "IT'S A TIE!" : `${winnerName} WINS!`;
+    $("victory-subtitle").textContent = `Final Score: ${finalScore}`;
+
+    // Stats summary
+    $("victory-stats").innerHTML = `
+        <div class="v-stat-row">
+            <div class="v-stat p1-v">
+                <h4>${p1.name}</h4>
+                <p>Team: ${p1.team.map(c => c.name).join(", ")}</p>
+                <p>Total Power: ${formatPowerLevel(teamTotalPower(p1))}</p>
+                <p>Budget Remaining: ${formatBudget(p1.budget)}</p>
+                <p>Synergies: ${(p1.activeSynergies || []).length}</p>
+            </div>
+            <div class="v-stat p2-v">
+                <h4>${p2.name}</h4>
+                <p>Team: ${p2.team.map(c => c.name).join(", ")}</p>
+                <p>Total Power: ${formatPowerLevel(teamTotalPower(p2))}</p>
+                <p>Budget Remaining: ${formatBudget(p2.budget)}</p>
+                <p>Synergies: ${(p2.activeSynergies || []).length}</p>
+            </div>
+        </div>
+    `;
+
+    showScreen("screen-victory");
+    sfxVictory();
+    startConfetti();
+}
+
+// ==================== CONFETTI ====================
+function startConfetti() {
+    const canvas = $("confetti-canvas");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    const ctx = canvas.getContext("2d");
+    const confettiPieces = [];
+    const colors = ["#a855f7", "#ec4899", "#f59e0b", "#10b981", "#3b82f6", "#ef4444", "#fbbf24"];
+
+    for (let i = 0; i < 200; i++) {
+        confettiPieces.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * -canvas.height,
+            w: rand(5, 12),
+            h: rand(3, 8),
+            color: colors[rand(0, colors.length - 1)],
+            vy: Math.random() * 3 + 2,
+            vx: (Math.random() - 0.5) * 2,
+            rot: Math.random() * 360,
+            rotSpeed: (Math.random() - 0.5) * 10,
+        });
+    }
+
+    let frameCount = 0;
+    function animateConfetti() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        confettiPieces.forEach(p => {
+            p.x += p.vx;
+            p.y += p.vy;
+            p.rot += p.rotSpeed;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rot * Math.PI) / 180);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+            ctx.restore();
+        });
+        frameCount++;
+        if (frameCount < 300) {
+            requestAnimationFrame(animateConfetti);
+        }
+    }
+    animateConfetti();
+}
+
+// ==================== PLAY AGAIN ====================
+$("btn-play-again").addEventListener("click", () => {
+    resetGameState();
+    localStorage.removeItem("aaa_save");
+    showScreen("screen-lobby");
+});
+
+// ==================== SAVE / LOAD (localStorage) ====================
+function saveGame() {
+    const saveData = {
+        players: GameState.players.map(p => ({
+            name: p.name,
+            budget: p.budget,
+            team: p.team,
+            score: p.score,
+            activeSynergies: p.activeSynergies || [],
+        })),
+        phase: GameState.currentScreen,
+        timestamp: Date.now(),
+    };
+    localStorage.setItem("aaa_save", JSON.stringify(saveData));
+}
+
+function loadGame() {
+    const raw = localStorage.getItem("aaa_save");
+    if (!raw) return false;
+    try {
+        const data = JSON.parse(raw);
+        data.players.forEach((p, i) => {
+            GameState.players[i].name = p.name;
+            GameState.players[i].budget = p.budget;
+            GameState.players[i].team = p.team;
+            GameState.players[i].score = p.score;
+            GameState.players[i].activeSynergies = p.activeSynergies || [];
+        });
+        return data.phase;
+    } catch { return false; }
+}
+
+// Auto-save after each phase transition
+const originalShowScreen = showScreen;
+showScreen = function(screenId) {
+    originalShowScreen(screenId);
+    if (["screen-power-reveal", "screen-teams", "screen-bracket", "screen-battle"].includes(screenId)) {
+        saveGame();
+    }
+};
+
+// Check for saved game on load
+(function checkSave() {
+    const raw = localStorage.getItem("aaa_save");
+    if (raw) {
+        try {
+            const data = JSON.parse(raw);
+            const mins = Math.round((Date.now() - data.timestamp) / 60000);
+            if (mins < 120) { // Only offer resume if < 2 hours old
+                const resumed = loadGame();
+                if (resumed && ["screen-power-reveal", "screen-teams", "screen-bracket"].includes(resumed)) {
+                    // Offer resume via a brief prompt
+                    const resumeDiv = document.createElement("div");
+                    resumeDiv.className = "resume-prompt";
+                    resumeDiv.innerHTML = `
+                        <div class="resume-inner">
+                            <p>🎮 Saved game found (${mins}m ago)</p>
+                            <p><strong>${data.players[0].name}</strong> vs <strong>${data.players[1].name}</strong></p>
+                            <button class="btn btn-primary" id="btn-resume">RESUME</button>
+                            <button class="btn btn-secondary" id="btn-new-game">NEW GAME</button>
+                        </div>
+                    `;
+                    document.body.appendChild(resumeDiv);
+                    $("btn-resume").addEventListener("click", () => {
+                        resumeDiv.remove();
+                        showTeamReview();
+                        showScreen(resumed);
+                    });
+                    $("btn-new-game").addEventListener("click", () => {
+                        resumeDiv.remove();
+                        localStorage.removeItem("aaa_save");
+                    });
+                }
+            }
+        } catch { /* ignore corrupt saves */ }
+    }
+})();
