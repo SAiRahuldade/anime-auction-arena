@@ -22,7 +22,7 @@ const roomStore = process.env.DATABASE_URL
   ? new Pool({ connectionString: process.env.DATABASE_URL, max: 5 })
   : null;
 
-const tierWeights = { X: 8, SSS: 12, S: 15, A: 18, B: 24, C: 28 };
+const tierWeights = { X: 7, SSS: 12, S: 15, A: 18, B: 24, C: 28 };
 
 function randomCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';

@@ -256,7 +256,7 @@ function playCharacterTheme(char) {
     const boost = audioCtx.createGain();
     const compressor = audioCtx.createDynamicsCompressor();
     const fade = audioCtx.createGain();
-    boost.gain.value = 50;
+    boost.gain.value = 20;
     compressor.threshold.value = -3;
     compressor.knee.value = 0;
     compressor.ratio.value = 20;
@@ -985,7 +985,7 @@ function startAuction() {
     stopBackgroundMusic();
 
     // Pick 15 unique characters based on tier rarity.
-    const tierWeights = { "X": 8, "SSS": 12, "S": 15, "A": 18, "B": 24, "C": 28 };
+    const tierWeights = { "X": 7, "SSS": 12, "S": 15, "A": 18, "B": 24, "C": 28 };
     let weightedPool = [];
 
     // Create a bigger pool so X-tier characters appear much more often without dominating every slot.
